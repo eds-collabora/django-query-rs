@@ -30,6 +30,7 @@ enum DjangoItem {
     Operators(Vec<DjangoOperator>),
     DefaultOperator1(syn::Ident),
     DefaultOperator2(syn::Path),
+    Ignored,
 }
 
 impl syn::parse::Parse for DjangoItem {
@@ -51,7 +52,11 @@ impl syn::parse::Parse for DjangoItem {
                 let _: syn::Token![=] = input.parse()?;
                 let fun = input.call(syn::Path::parse_mod_style)?;
                 Ok(DjangoItem::DefaultOperator2(fun))
-            }
+            },
+            "exclude" => {
+                eprintln!("Got exclude");
+                Ok(DjangoItem::Ignored)
+            },
             "op" => {
                 // op(in = MyInOperatorClass)
                 let content;
@@ -68,10 +73,13 @@ impl syn::parse::Parse for DjangoItem {
 }
 
 #[derive(Debug)]
-struct DjangoMeta {
-    pub name: Option<syn::LitStr>,
-    pub default_operator: (Option<syn::Ident>, Option<syn::Path>),
-    pub operators: BTreeMap<String, Option<syn::Path>>,
+enum DjangoMeta {
+    Included {
+        name: Option<syn::LitStr>,
+        default_operator: (Option<syn::Ident>, Option<syn::Path>),
+        operators: BTreeMap<String, Option<syn::Path>>,
+    },
+    Excluded
 }
 
 impl syn::parse::Parse for DjangoMeta {
@@ -79,6 +87,7 @@ impl syn::parse::Parse for DjangoMeta {
         let mut field_name = None;
         let mut operators = BTreeMap::new();
         let mut defop = (None, None);
+        let mut excluded = false;
         let punc =
             syn::punctuated::Punctuated::<DjangoItem, syn::Token![,]>::parse_terminated(input)?;
 
@@ -86,7 +95,7 @@ impl syn::parse::Parse for DjangoMeta {
             match item {
                 DjangoItem::Rename(new_name) => {
                     field_name = Some(new_name);
-                }
+                },
                 DjangoItem::Operators(ops) => {
                     for op in ops {
                         match op {
@@ -98,20 +107,29 @@ impl syn::parse::Parse for DjangoMeta {
                             }
                         }
                     }
-                }
+                },
                 DjangoItem::DefaultOperator2(fun) => {
                     defop = (None, Some(fun));
-                }
+                },
                 DjangoItem::DefaultOperator1(op) => {
                     defop = (Some(op), None);
+                },
+                DjangoItem::Ignored => {
+                    eprintln!("Saw ignored");
+                    excluded = true;
                 }
             }
         }
-        Ok(Self {
-            name: field_name,
-            default_operator: defop,
-            operators,
-        })
+        if excluded {
+            eprintln!("Excluded");
+            Ok(Self::Excluded)
+        } else {
+            Ok(Self::Included {
+                name: field_name,
+                default_operator: defop,
+                operators
+            })
+        }
     }
 }
 
@@ -123,24 +141,24 @@ pub fn go(input: TokenStream) -> TokenStream {
         generics,
         ..
     } = syn::parse_macro_input!(input);
-
+    
     let mut body = pm2::TokenStream::new();
     let mut structs = pm2::TokenStream::new();
 
     let builtin_operators = BTreeMap::<_, syn::Path>::from([
-        ("eq", syn::parse_quote! {crate::operators::Eq}),
-        ("in", syn::parse_quote! {crate::operators::In}),
-        ("lt", syn::parse_quote! {crate::operators::Less}),
-        ("lte", syn::parse_quote! {crate::operators::LessEq}),
-        ("gt", syn::parse_quote! {crate::operators::Greater}),
-        ("gte", syn::parse_quote! {crate::operators::GreaterEq}),
-        ("contains", syn::parse_quote! {crate::operators::Contains}),
-        ("icontains", syn::parse_quote! {crate::operators::IContains}),
+        ("eq", syn::parse_quote! {::django_query::operators::Eq}),
+        ("in", syn::parse_quote! {::django_query::operators::In}),
+        ("lt", syn::parse_quote! {::django_query::operators::Less}),
+        ("lte", syn::parse_quote! {::django_query::operators::LessEq}),
+        ("gt", syn::parse_quote! {::django_query::operators::Greater}),
+        ("gte", syn::parse_quote! {::django_query::operators::GreaterEq}),
+        ("contains", syn::parse_quote! {::django_query::operators::Contains}),
+        ("icontains", syn::parse_quote! {::django_query::operators::IContains}),
         (
             "startswith",
-            syn::parse_quote! {crate::operators::StartsWith},
+            syn::parse_quote! {::django_query::operators::StartsWith},
         ),
-        ("endswith", syn::parse_quote! {crate::operators::EndsWith}),
+        ("endswith", syn::parse_quote! {::django_query::operators::EndsWith}),
     ]);
 
     let wc = generics.where_clause.as_ref();
@@ -152,37 +170,48 @@ pub fn go(input: TokenStream) -> TokenStream {
                 let mut fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
                 let mut operators = BTreeMap::new();
                 let mut defop = None;
-
+                let mut excluded = false;
+                
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        let dj: DjangoMeta =
-                            attr.parse_args().expect("failed to parse django attribute");
-                        if let Some(name) = dj.name {
-                            fieldname = name;
-                        }
-                        for (key, value) in dj.operators {
-                            if let Some(value) = value {
-                                operators.insert(key, value);
-                            } else {
-                                operators.insert(
-                                    key.clone(),
-                                    builtin_operators.get(key.as_str()).unwrap().clone(),
-                                );
+                        match attr.parse_args().expect("failed to parse django attribute") {
+                            DjangoMeta::Included { name, default_operator, operators: djoperators } => {
+                                if let Some(name) = name {
+                                    fieldname = name;
+                                }
+                                for (key, value) in djoperators {
+                                    if let Some(value) = value {
+                                        operators.insert(key, value);
+                                    } else {
+                                        operators.insert(
+                                            key.clone(),
+                                            builtin_operators.get(key.as_str()).unwrap().clone(),
+                                        );
+                                    }
+                                }
+                                match default_operator {
+                                    (Some(op), None) => {
+                                        defop = Some(
+                                            builtin_operators
+                                                .get(op.to_string().as_str())
+                                                .unwrap()
+                                                .clone(),
+                                            )
+                                    }
+                                    (None, Some(fun)) => defop = Some(fun),
+                                    _ => {}
+                                }
+                            },
+                            DjangoMeta::Excluded => {
+                                eprintln!("Marked excluded");
+                                excluded = true;
                             }
-                        }
-                        match dj.default_operator {
-                            (Some(op), None) => {
-                                defop = Some(
-                                    builtin_operators
-                                        .get(op.to_string().as_str())
-                                        .unwrap()
-                                        .clone(),
-                                )
-                            }
-                            (None, Some(fun)) => defop = Some(fun),
-                            _ => {}
                         }
                     }
+                }
+                if excluded {
+                    eprintln!("skipped");
+                    continue;
                 }
                 let fieldtype = &field.ty;
                 let structname =
@@ -192,7 +221,7 @@ pub fn go(input: TokenStream) -> TokenStream {
                     #[derive(Clone)]
                     struct #structname;
                     #[automatically_derived]
-                    impl #generics Field<#ident #generics> for #structname #wc {
+                    impl #generics ::django_query::Field<#ident #generics> for #structname #wc {
                         type Value = #fieldtype;
                         fn value<'a>(&self, data: &'a #ident #generics) -> &'a #fieldtype {
                             &data.#fieldid
@@ -203,15 +232,15 @@ pub fn go(input: TokenStream) -> TokenStream {
                 let defop = if let Some(op) = defop {
                     op
                 } else {
-                    syn::parse_quote! {crate::operators::Eq}
+                    syn::parse_quote! {::django_query::operators::Eq}
                 };
 
                 body.extend(quote::quote! {
-                    let mut qf = QueryableField::new(FilterClassImpl::new(#structname, #defop));
+                    let mut qf = ::django_query::QueryableField::new(::django_query::filtering::FilterClassImpl::new(#structname, #defop));
                 });
                 for (key, value) in operators {
                     body.extend(quote::quote! {
-                        qf.add_operator(#key, FilterClassImpl::new(#structname, #value));
+                        qf.add_operator(#key, ::django_query::filtering::FilterClassImpl::new(#structname, #value));
                     });
                 }
                 body.extend(quote::quote! {
@@ -230,8 +259,8 @@ pub fn go(input: TokenStream) -> TokenStream {
             #structs
             #[automatically_derived]
             impl #generics Queryable for #ident #generics #wc {
-                fn create_metadata() -> QueryableRecord<Self> {
-                    let mut qr = QueryableRecord::new();
+                fn create_metadata() -> ::django_query::QueryableRecord<Self> {
+                    let mut qr = ::django_query::QueryableRecord::new();
                     #body
                     qr
                 }

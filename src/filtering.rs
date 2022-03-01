@@ -87,7 +87,7 @@ where
     }
 }
 
-pub(crate) struct FilterClassImpl<F, O> {
+pub struct FilterClassImpl<F, O> {
     field: F,
     opclass: O,
 }
@@ -187,7 +187,7 @@ impl<R: ?Sized> QueryableRecord<R> {
     }
 }
 
-//#[cfg(Test)]
+#[cfg(Test)]
 mod tests {
     use super::*;
 

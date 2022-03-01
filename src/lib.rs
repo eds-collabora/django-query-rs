@@ -1,4 +1,4 @@
-mod filtering;
+pub mod filtering;
 pub mod operators;
 
 pub use crate::filtering::{
