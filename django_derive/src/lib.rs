@@ -221,7 +221,7 @@ pub fn go(input: TokenStream) -> TokenStream {
                     #[derive(Clone)]
                     struct #structname;
                     #[automatically_derived]
-                    impl #generics ::django_query::Field<#ident #generics> for #structname #wc {
+                    impl #generics ::django_query::ScalarField<#ident #generics> for #structname #wc {
                         type Value = #fieldtype;
                         fn value<'a>(&self, data: &'a #ident #generics) -> &'a #fieldtype {
                             &data.#fieldid

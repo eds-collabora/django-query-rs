@@ -16,10 +16,26 @@ pub enum FilterError {
     Instantiation(#[from] anyhow::Error),
 }
 
+// What if Field was uppermost here?
 pub trait Field<R> {
+    type Value;
+    fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
+}
+
+pub trait ScalarField<R> {
     type Value;
     fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value;
 }
+
+impl<R,T> Field<R> for T
+where
+    T: ScalarField<R>
+{
+    type Value = <T as ScalarField<R>>::Value;
+    fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool {
+        op.apply(self.value(data))
+    }
+}        
 
 pub trait Operator<T> {
     fn apply(&self, value: &T) -> bool;
@@ -83,7 +99,7 @@ where
     O: Operator<T>,
 {
     fn filter_one(&self, data: &R) -> bool {
-        self.operator.apply(self.field.value(data))
+        self.field.apply(&self.operator, data)
     }
 }
 

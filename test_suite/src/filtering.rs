@@ -1,4 +1,4 @@
-#[cfg(test)]
+//#[cfg(test)]
 mod tests {
     use std::fmt::Debug;
     use std::str::FromStr;
@@ -14,7 +14,7 @@ mod tests {
     #[derive(Clone)]
     struct MyStringField;
 
-    impl<T> Field<MyRecord<T>> for MyStringField
+    impl<T> ScalarField<MyRecord<T>> for MyStringField
     where
         T: Clone,
     {
@@ -27,7 +27,7 @@ mod tests {
     #[derive(Clone)]
     struct MyIntField;
 
-    impl<T> Field<MyRecord<T>> for MyIntField
+    impl<T> ScalarField<MyRecord<T>> for MyIntField
     where
         T: Clone,
     {
@@ -40,7 +40,7 @@ mod tests {
     #[derive(Clone)]
     struct MyTField;
 
-    impl<T> Field<MyRecord<T>> for MyTField
+    impl<T> ScalarField<MyRecord<T>> for MyTField
     where
         T: Clone,
     {
