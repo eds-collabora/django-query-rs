@@ -1,204 +1,16 @@
-use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::str::FromStr;
-
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum FilterError {
-    #[error("malformed query has no '='")]
-    MissingEquals,
-    #[error("no such operator '{0}'")]
-    NoOperator(String),
-    #[error("no such field '{0}'")]
-    NoField(String),
-    #[error(transparent)]
-    Instantiation(#[from] anyhow::Error),
-}
-
-pub trait Field<R> {
-    type Value;
-    fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value;
-}
-
-pub trait Operator<T> {
-    fn apply(&self, value: &T) -> bool;
-}
-
-pub trait OperatorClass<T> {
-    type Instance: Operator<T>;
-    fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError>;
-}
-
-pub trait Filter<R> {
-    fn filter_one(&self, data: &R) -> bool;
-    fn filter_vec(&self, data: &mut Vec<R>) {
-        data.retain(|r| self.filter_one(r))
-    }
-}
-
-pub trait FilterClass<R: ?Sized> {
-    fn instantiate(&self, rhs: &str) -> Result<Box<dyn Filter<R>>, FilterError>;
-}
-
-pub trait Queryable {
-    fn create_metadata() -> QueryableRecord<Self>;
-
-    fn create_filter_from_query_pair(
-        lhs: &str,
-        rhs: &str,
-    ) -> Result<Box<dyn Filter<Self>>, FilterError> {
-        let query_parts = lhs.splitn(2, "__").collect::<Vec<_>>();
-        if query_parts.len() < 2 {
-            Self::create_metadata().create_filter(lhs, None, rhs)
-        } else {
-            Self::create_metadata().create_filter(query_parts[0], Some(query_parts[1]), rhs)
-        }
-    }
-
-    fn create_filter_from_query(expr: &str) -> Result<Box<dyn Filter<Self>>, FilterError> {
-        let parts = expr.splitn(2, '=').collect::<Vec<_>>();
-        if parts.len() != 2 {
-            Err(FilterError::MissingEquals)
-        } else {
-            Self::create_filter_from_query_pair(parts[0], parts[1])
-        }
-    }
-}
-
-pub(crate) struct FilterImpl<F, O> {
-    field: F,
-    operator: O,
-}
-
-impl<F, O> FilterImpl<F, O> {
-    pub fn new(field: F, operator: O) -> Self {
-        Self { field, operator }
-    }
-}
-
-impl<F, O, T, R> Filter<R> for FilterImpl<F, O>
-where
-    F: Field<R, Value = T>,
-    O: Operator<T>,
-{
-    fn filter_one(&self, data: &R) -> bool {
-        self.operator.apply(self.field.value(data))
-    }
-}
-
-pub struct FilterClassImpl<F, O> {
-    field: F,
-    opclass: O,
-}
-
-impl<F, O> FilterClassImpl<F, O> {
-    pub fn new(field: F, opclass: O) -> Self {
-        Self { field, opclass }
-    }
-}
-
-impl<F, O, R, T> FilterClass<R> for FilterClassImpl<F, O>
-where
-    F: Field<R, Value = T> + Clone + 'static,
-    O: OperatorClass<T>,
-    <O as OperatorClass<T>>::Instance: 'static,
-{
-    fn instantiate(&self, rhs: &str) -> Result<Box<dyn Filter<R>>, FilterError> {
-        Ok(Box::new(FilterImpl::new(
-            self.field.clone(),
-            self.opclass.instantiate(rhs)?,
-        )))
-    }
-}
-
-pub struct QueryableField<R: ?Sized> {
-    default: Box<dyn FilterClass<R>>,
-    operators: BTreeMap<String, Box<dyn FilterClass<R>>>,
-}
-
-impl<R: ?Sized> QueryableField<R> {
-    pub fn new<F>(default: F) -> Self
-    where
-        F: FilterClass<R> + 'static,
-    {
-        Self {
-            default: Box::new(default),
-            operators: BTreeMap::new(),
-        }
-    }
-
-    pub fn add_operator<F>(&mut self, name: &str, filter_class: F)
-    where
-        F: FilterClass<R> + 'static,
-    {
-        self.operators
-            .insert(name.to_string(), Box::new(filter_class));
-    }
-
-    pub fn create_filter(
-        &self,
-        operator: Option<&str>,
-        rhs: &str,
-    ) -> Result<Box<dyn Filter<R>>, FilterError> {
-        if let Some(operator) = operator {
-            self.operators
-                .get(operator)
-                .ok_or_else(|| FilterError::NoOperator(operator.to_string()))?
-                .instantiate(rhs)
-        } else {
-            self.default.instantiate(rhs)
-        }
-    }
-}
-
-pub struct QueryableRecord<R: ?Sized> {
-    // map from field names to supported operators
-    fields: BTreeMap<String, QueryableField<R>>,
-}
-
-impl<R: ?Sized> Default for QueryableRecord<R> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<R: ?Sized> QueryableRecord<R> {
-    pub fn new() -> Self {
-        Self {
-            fields: BTreeMap::new(),
-        }
-    }
-
-    pub fn add_field(&mut self, name: &str, q: QueryableField<R>) {
-        self.fields.insert(name.to_string(), q);
-    }
-
-    pub fn create_filter(
-        &self,
-        field: &str,
-        operator: Option<&str>,
-        rhs: &str,
-    ) -> Result<Box<dyn Filter<R>>, FilterError> {
-        self.fields
-            .get(field)
-            .ok_or_else(|| FilterError::NoField(field.to_string()))?
-            .create_filter(operator, rhs)
-    }
-}
-
-#[cfg(Test)]
+#[cfg(test)]
 mod tests {
-    use super::*;
-
-    use derive_queryable::Queryable;
+    use std::fmt::Debug;
+    use std::str::FromStr;
+    
+    use django_query::*;
 
     struct MyRecord<T> {
         string_field: String,
         int_field: i32,
         foo: T,
     }
-
+    
     #[derive(Clone)]
     struct MyStringField;
 
@@ -240,15 +52,15 @@ mod tests {
 
     impl<T> Queryable for MyRecord<T>
     where
-        T: Clone + Eq + FromStr + 'static,
+        T: Clone + Equatable + FromStr + 'static,
         <T as FromStr>::Err: std::error::Error + Debug + Send + Sync,
     {
         fn create_metadata() -> QueryableRecord<Self> {
             let mut qr = QueryableRecord::new();
             let qf1 =
-                QueryableField::new(FilterClassImpl::new(MyStringField, crate::operators::Eq));
-            let qf2 = QueryableField::new(FilterClassImpl::new(MyIntField, crate::operators::Eq));
-            let qf3 = QueryableField::new(FilterClassImpl::new(MyTField, crate::operators::Eq));
+                QueryableField::new(FilterClassImpl::new(MyStringField, operators::Eq));
+            let qf2 = QueryableField::new(FilterClassImpl::new(MyIntField, operators::Eq));
+            let qf3 = QueryableField::new(FilterClassImpl::new(MyTField, operators::Eq));
             qr.add_field("string_field", qf1);
             qr.add_field("int_field", qf2);
             qr.add_field("foo", qf3);
@@ -264,8 +76,8 @@ mod tests {
             foo: "hello",
         };
         let sfield = MyStringField;
-        let opcls = crate::operators::Eq;
-        let op = opcls.instantiate("test").unwrap();
+        let opcls = operators::Eq;
+        let op = OperatorClass::<String>::instantiate(&opcls, "test").unwrap();
         let filter = FilterImpl::new(sfield, op);
         assert!(filter.filter_one(&r));
     }
@@ -278,8 +90,8 @@ mod tests {
             foo: 5,
         };
         let sfield = MyTField;
-        let opcls = crate::operators::Eq;
-        let op = opcls.instantiate("5").unwrap();
+        let opcls = operators::Eq;
+        let op = OperatorClass::<i32>::instantiate(&opcls, "5").unwrap();
         let filter = FilterImpl::new(sfield, op);
         assert!(filter.filter_one(&r));
     }
@@ -292,7 +104,7 @@ mod tests {
             foo: 0,
         };
         let mut qr = QueryableRecord::new();
-        let qf1 = QueryableField::new(FilterClassImpl::new(MyStringField, crate::operators::Eq));
+        let qf1 = QueryableField::new(FilterClassImpl::new(MyStringField, operators::Eq));
         qr.add_field("string_field", qf1);
 
         let filter = qr.create_filter("string_field", None, "test").unwrap();
@@ -319,13 +131,13 @@ mod tests {
     #[derive(Queryable)]
     struct MyRecord2<T>
     where
-        T: Eq + FromStr + 'static,
+        T: Equatable + FromStr + 'static,
         <T as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(rename = "MYSTRING")]
         string_field: String,
         int_field: i32,
-        #[django(rename="bar", op(in=crate::operators::In))]
+        #[django(rename="bar", op(in=operators::In))]
         foo: T,
     }
 
@@ -392,7 +204,7 @@ mod tests {
     #[derive(Queryable)]
     struct MyRecord3<T>
     where
-        T: Eq + FromStr + 'static,
+        T: Equatable + FromStr + 'static,
         <T as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(rename = "MYSTRING")]
@@ -452,7 +264,7 @@ mod tests {
     #[derive(Queryable)]
     struct MyRecord4<T>
     where
-        T: Eq + FromStr + 'static,
+        T: Equatable + FromStr + 'static,
         <T as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(
@@ -463,7 +275,7 @@ mod tests {
             op(endswith)
         )]
         string_field: String,
-        #[django(default_fun = crate::operators::In, op(eq,lt,lte,gt,gte=crate::operators::GreaterEq))]
+        #[django(default_fun = operators::In, op(eq,lt,lte,gt,gte=operators::GreaterEq))]
         int_field: i32,
         #[django(rename = "bar", op(in))]
         foo: T,

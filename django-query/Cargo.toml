@@ -1,0 +1,11 @@
+[package]
+name = "django-query"
+version = "0.1.0"
+authors = ["Edmund Smith <ed.smith@collabora.com>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1.0"
+django_derive= { path="../django_derive" }
