@@ -36,6 +36,22 @@ where
     }
 }
 
+pub struct NestedField<F,G> {
+    outer_field: F,
+    inner_field: G,
+}
+    
+impl<F, G, R, S, T> ScalarField<R> for NestedField<F, G>
+where
+    F: ScalarField<R, Value=S>,
+    G: ScalarField<S, Value=T>
+{
+    type Value = <G as ScalarField<S>>::Value;
+    fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value {
+        self.inner_field.value(self.outer_field.value(data))
+    }
+}
+
 /*
 pub struct VectorField<F> {
     field: F
