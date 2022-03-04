@@ -41,6 +41,37 @@ where
     }
 }
 
+impl<T> Operator<Vec<T>> for EqImpl<T>
+where
+    T: Equatable
+{
+    fn apply(&self, value: &Vec<T>) -> bool {
+        value.iter().any(|x| x == &self.target)
+    }
+}
+
+/*
+struct OperatorAny<O> {
+    op: O
+}
+
+impl<O> OperatorAny<O> {
+    pub fn new(op: O) -> Self {
+        Self {
+            op
+        }
+    }
+}
+
+impl<T, O> Operator<Vec<T>> for OperatorAny<O>
+where
+    O: Operator<T>
+{
+    fn apply(&self, value: &Vec<T>) -> bool {
+        value.iter().any(|x| self.op.apply(x))
+    }
+}
+*/    
 pub struct Eq;
 
 impl<T> OperatorClass<T> for Eq

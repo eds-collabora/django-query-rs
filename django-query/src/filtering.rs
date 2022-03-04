@@ -16,7 +16,6 @@ pub enum FilterError {
     Instantiation(#[from] anyhow::Error),
 }
 
-// What if Field was uppermost here?
 pub trait Field<R> {
     type Value;
     fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
@@ -35,7 +34,37 @@ where
     fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool {
         op.apply(self.value(data))
     }
-}        
+}
+
+/*
+pub struct VectorField<F> {
+    field: F
+}
+
+impl<F, R, S> Field<R> for VectorField<F>
+where
+    F: Field<R>,
+    for<'a> &'a<F as Field<R>>::Value: IntoIterator<Item=S>,
+{
+    type Value = S;
+    fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool {
+        self.field.value().into_iter().any(|x| op.apply(x))
+    }
+}
+ */
+
+const _: () = {
+    struct Record {
+        foo: Vec<String>,
+    }
+    struct VecField;
+    impl Field<Record> for VecField {
+        type Value = String;
+        fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &Record) -> bool {
+            data.foo.iter().any(|x| op.apply(x))
+        }
+    }
+};
 
 pub trait Operator<T> {
     fn apply(&self, value: &T) -> bool;
