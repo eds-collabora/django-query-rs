@@ -16,24 +16,42 @@ pub enum FilterError {
     Instantiation(#[from] anyhow::Error),
 }
 
-pub trait Field<R> {
-    type Value;
-    fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
-}
-
-pub trait ScalarField<R: ?Sized> {
+pub trait Field<R>: Clone
+{
     type Value;
     fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value;
 }
 
-impl<R,T> Field<R> for T
+pub trait Member<R>: Field<R> {
+    fn accept_visitor<V: MemberVisitor<Self, R, <Self as Field<R>>::Value>>(&self, visitor: &mut V);
+}
+
+pub trait MemberVisitor<F, R, T>
 where
-    T: ScalarField<R>
+    F: Member<R, Value=T> + Clone,
 {
-    type Value = <T as ScalarField<R>>::Value;
-    fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool {
-        op.apply(self.value(data))
-    }
+    fn visit_operator<O>(&mut self, name: &str, f: &F, op: O)
+    where
+        F: 'static,
+        O: OperatorClass<T> + 'static, 
+        <O as OperatorClass<T>>::Instance: 'static;
+}
+
+pub trait Record {
+    fn accept_visitor<V: RecordVisitor<Self>>(&self, visitor: &mut V) where Self: Sized;
+}
+
+pub trait RecordVisitor<R> {
+    fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
+    where
+        F: Member<R, Value=T> + Clone + 'static,
+        O: OperatorClass<T> + 'static,
+        <O as OperatorClass<T>>::Instance: 'static;
+
+    fn visit_record<F, T>(&mut self, name: &str, field: &F, inner_record: &T)
+    where
+        F: Member<R, Value=T> + Clone + 'static,
+        T: Record;
 }
 
 pub struct NestedField<F,G> {
@@ -54,10 +72,10 @@ where
     }
 }
 
-impl<F, G, R, S, T> ScalarField<R> for NestedField<F, G>
+impl<F, G, R, S, T> Field<R> for NestedField<F, G>
 where
-    F: ScalarField<R, Value=S>,
-    G: ScalarField<S, Value=T>,
+    F: Field<R, Value=S>,
+    G: Field<S, Value=T>,
     S: 'static
 {
     type Value = T;
@@ -66,14 +84,13 @@ where
     }
 }
 
-pub trait Nester<R, U, F>
+pub trait Nester<R, U, F, O>
 where
-    R: ?Sized,
-    F: ScalarField<U, Value=R>,
+    F: Field<U, Value=R>,
 {
-    fn nest<G,T>(&self, nested_field: G) -> NestedField<F, G>
+    fn nest<G,T,P>(&self, nested_field: G) -> NestedField<F, G>
     where
-        G: ScalarField<R, Value=T>,
+        G: Field<R, Value=T>,
         R: 'static;
 }
 
@@ -82,13 +99,13 @@ struct NesterImpl<F>
     outer_field: F
 }
 
-impl<R, U, F> Nester<R,U,F> for NesterImpl<F>
+impl<R, U, F, O> Nester<R,U,F,O> for NesterImpl<F>
 where
-    F: ScalarField<U, Value=R> + Clone,
+    F: Field<U, Value=R> + Clone,
 {
-    fn nest<G,T>(&self, inner_field: G) -> NestedField<F, G>
+    fn nest<G,T,P>(&self, inner_field: G) -> NestedField<F, G>
     where
-        G: ScalarField<R, Value=T>,
+        G: Field<R, Value=T>,
         R: 'static
     {
         NestedField {
@@ -97,151 +114,6 @@ where
         }
     }
 }
-
-
-pub trait Traversable {
-    fn complete_qr<N, U, F>(prefix: &str, nf: N, q: &mut QueryableRecord<U>)
-    where
-        N: Nester<Self, U, F>,
-        F: ScalarField<U, Value=Self> + Clone + 'static;
-        
-}
-
-struct TestRecord {
-    mem: TestRecord2
-}
-
-struct TestRecord2 {
-    s: String
-}
-
-#[derive(Clone)]
-struct TRStringField;
-
-impl ScalarField<TestRecord2> for TRStringField {
-    type Value = String;
-    fn value<'a>(&'_ self, data: &'a TestRecord2) -> &'a String {
-        &data.s
-    }
-}
-
-impl Traversable for TestRecord2 {
-    fn complete_qr<N, U, F>(prefix: &str, nf: N, q: &mut QueryableRecord<U>)
-    where
-        N: Nester<Self, U, F>,
-        F: ScalarField<U, Value=Self> + Clone + 'static
-    {
-        let qf1 = QueryableField::new(FilterClassImpl::new(nf.nest(TRStringField), crate::operators::Eq));
-          
-        q.add_field(format!("{}__s", prefix).as_str(), qf1)
-    }
-}
-
-// struct TestRecord {
-//     mem: TestRecord2
-// }
-
-// struct MemField;
-
-// impl ScalarField<TestRecord> for MemField {
-//     type Value = TestRecord2;
-//     fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value {
-//         &data.mem
-//     }
-// }
-
-// struct TestRecord2 {
-//     mem: String
-// }
-
-// impl Nester<TestRecord2> for NesterImpl<TestRecord, MemField>
-// {
-//     fn nest<F,G,T,U>(&self, nested_field: F) -> G
-//     where
-//         F: ScalarField<TestRecord2, Value=T>,
-//         G: ScalarField<U, Value=T>,
-//     {
-        
-//         /* NestedField<B, F>
-//              => F = B
-//              => G = R
-      
-//              U = A
-
-//          Refusing to identify NestedField<B,F> as G
-//         */
-
-//         let x: Box<dyn ScalarField<A, Value=T>> = Box::new(NestedField::<B, F> {
-//             outer_field: self.outer_field.clone(),
-//             inner_field: nested_field
-//         });
-
-//         let y: Box<dyn ScalarField<U, Value=T>> = Box::new(NestedField::<B, F> {
-//             outer_field: self.outer_field.clone(),
-//             inner_field: nested_field
-//         });
-        
-//         let f: G = NestedField::<B, F> {
-//             outer_field: self.outer_field.clone(),
-//             inner_field: nested_field
-//         };
-//         f
-//     }
-// }
-
-// const _: () = {
-//     struct Record {
-//         m: String
-//     }
-//     struct MField;
-//     impl ScalarField<Record> for MField {
-//         type Value = String;
-//         fn value<'a>(&'_ self, data: &'a Record) -> &'a Self::Value {
-//             &data.m
-//         }
-//     }
-//     struct OuterRecord {
-//         r: Record
-//     }
-//     struct RField;
-//     impl ScalarField<OuterRecord> for RField {
-//         type Value = Record;
-//         fn value<'a>(&'_ self, data: &'a OuterRecord) -> &'a Self::Value {
-//             &data.r
-//         }
-//     }
-        
-// };
-
-/*
-pub struct VectorField<F> {
-    field: F
-}
-
-impl<F, R, S> Field<R> for VectorField<F>
-where
-    F: Field<R>,
-    for<'a> &'a<F as Field<R>>::Value: IntoIterator<Item=S>,
-{
-    type Value = S;
-    fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool {
-        self.field.value().into_iter().any(|x| op.apply(x))
-    }
-}
- */
-
-const _: () = {
-    struct Record {
-        foo: Vec<String>,
-    }
-    struct VecField;
-    impl Field<Record> for VecField {
-        type Value = String;
-        fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &Record) -> bool {
-            data.foo.iter().any(|x| op.apply(x))
-        }
-    }
-};
 
 pub trait Operator<T> {
     fn apply(&self, value: &T) -> bool;
@@ -259,10 +131,11 @@ pub trait Filter<R> {
     }
 }
 
-pub trait FilterClass<R: ?Sized> {
+pub trait FilterClass<R> {
     fn instantiate(&self, rhs: &str) -> Result<Box<dyn Filter<R>>, FilterError>;
 }
 
+/*
 pub trait Queryable {
     fn create_metadata() -> QueryableRecord<Self>;
 
@@ -287,6 +160,7 @@ pub trait Queryable {
         }
     }
 }
+ */
 
 pub struct FilterImpl<F, O> {
     field: F,
@@ -305,7 +179,7 @@ where
     O: Operator<T>,
 {
     fn filter_one(&self, data: &R) -> bool {
-        self.field.apply(&self.operator, data)
+        self.operator.apply(self.field.value(data))
     }
 }
 
@@ -324,7 +198,7 @@ impl<F, O, R, T> FilterClass<R> for FilterClassImpl<F, O>
 where
     F: Field<R, Value = T> + Clone + 'static,
     O: OperatorClass<T>,
-    <O as OperatorClass<T>>::Instance: 'static,
+    <O as OperatorClass<T>>::Instance: 'static
 {
     fn instantiate(&self, rhs: &str) -> Result<Box<dyn Filter<R>>, FilterError> {
         Ok(Box::new(FilterImpl::new(
@@ -334,28 +208,24 @@ where
     }
 }
 
-pub struct QueryableField<R: ?Sized> {
+pub struct QueryableMember<R> {
     default: Box<dyn FilterClass<R>>,
     operators: BTreeMap<String, Box<dyn FilterClass<R>>>,
 }
 
-impl<R: ?Sized> QueryableField<R> {
-    pub fn new<F>(default: F) -> Self
+impl<R> QueryableMember<R> {
+    pub fn new<F, O, T>(f: F, defop: O) -> Self
     where
-        F: FilterClass<R> + 'static,
+        F: Member<R, Value=T> + 'static,
+        O: OperatorClass<T> + 'static,
+        <O as OperatorClass<T>>::Instance: 'static
     {
-        Self {
-            default: Box::new(default),
+        let mut res = Self {
+            default: Box::new(FilterClassImpl::new(f, defop)),
             operators: BTreeMap::new(),
-        }
-    }
-
-    pub fn add_operator<F>(&mut self, name: &str, filter_class: F)
-    where
-        F: FilterClass<R> + 'static,
-    {
-        self.operators
-            .insert(name.to_string(), Box::new(filter_class));
+        };
+        f.accept_visitor(&mut res);
+        res
     }
 
     pub fn create_filter(
@@ -374,26 +244,33 @@ impl<R: ?Sized> QueryableField<R> {
     }
 }
 
-pub struct QueryableRecord<R: ?Sized> {
+impl<F, R, T> MemberVisitor<F, R, T> for QueryableMember<R>
+where
+    F: Member<R, Value=T> + Clone,
+{
+    fn visit_operator<O>(&mut self, name: &str, f: &F, op: O)
+    where
+        F: 'static,
+        O: OperatorClass<T> + 'static,
+        <O as OperatorClass<T>>::Instance: 'static
+    {
+        self.operators
+            .insert(name.to_string(), Box::new(FilterClassImpl::new(f.clone(), op)));
+    }
+}   
+
+pub struct QueryableRecord<R> {
     // map from field names to supported operators
-    fields: BTreeMap<String, QueryableField<R>>,
+    fields: BTreeMap<String, QueryableMember<R>>,
 }
 
-impl<R: ?Sized> Default for QueryableRecord<R> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<R: ?Sized> QueryableRecord<R> {
-    pub fn new() -> Self {
-        Self {
+impl<R: Record> QueryableRecord<R> {
+    pub fn new(r: R) -> Self {
+        let mut res = Self {
             fields: BTreeMap::new(),
-        }
-    }
-
-    pub fn add_field(&mut self, name: &str, q: QueryableField<R>) {
-        self.fields.insert(name.to_string(), q);
+        };
+        r.accept_visitor(&mut res);
+        res
     }
 
     pub fn create_filter(
@@ -408,3 +285,72 @@ impl<R: ?Sized> QueryableRecord<R> {
             .create_filter(operator, rhs)
     }
 }
+
+impl<R: Record> RecordVisitor<R> for QueryableRecord<R> {
+    fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
+    where
+        F: Member<R, Value=T> + Clone + 'static,
+        O: OperatorClass<T> + 'static,
+        <O as OperatorClass<T>>::Instance: 'static,
+    {
+        self.fields.insert(name.to_string(), QueryableMember::new(field.clone(), defop));
+    }
+
+    fn visit_record<F, T>(&mut self, name: &str, field: &F, inner_record: &T)
+    where
+        F: Member<R, Value=T> + Clone + 'static,
+        T: Record
+    {
+        let mut n = NestedRecordVisitor {
+            parent: self,
+            prefix: name.to_string(),
+            nester: NesterImpl {
+                outer_field: field.clone()
+            },
+            _marker: Default::default(),
+        };
+
+        inner_record.accept_visitor(&mut n);
+    }
+}
+
+struct NestedRecordVisitor<'a, F, R, P>
+{
+    parent: &'a mut P,
+    prefix: String,
+    nester: NesterImpl<F>,
+    _marker: std::marker::PhantomData<R>,        
+}
+
+impl<'a, R, G, P, S> RecordVisitor<S> for NestedRecordVisitor<'a, G, R, P>
+where
+    G: Field<R, Value=S> + Clone,
+    P: RecordVisitor<R>
+{
+    fn visit_member<F, O, T>(&mut self, name: &str, field: &F, defop: O)
+    where
+        F: Member<S, Value=T> + Clone + 'static,
+        O: OperatorClass<T>
+    {
+        self.parent.visit_member(format!("{}__{}", self.prefix, name).as_str(), 
+                                 &self.nester.nest(field.clone()), defop);
+    }
+
+    fn visit_record<F,T>(&mut self, name: &str, field: &F, inner_record: &T)
+    where
+        F: Member<S, Value=T> + Clone + 'static,
+        T: Record
+    {
+        let mut n = NestedRecordVisitor {
+            parent: self,
+            prefix: format!("{}__{}", self.prefix, name),
+            nester: NesterImpl {
+                outer_field: field.clone()
+            },
+            _marker: Default::default(),
+
+        };
+        inner_record.accept_visitor(&mut n);
+    }
+}
+
