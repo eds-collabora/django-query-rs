@@ -51,7 +51,7 @@ pub trait RecordVisitor<R> {
     fn visit_record<F, T>(&mut self, name: &str, field: &F, inner_record: &T)
     where
         F: Member<R, Value=T> + Clone + 'static,
-        T: Record;
+        T: Record + 'static;
 }
 
 pub struct NestedField<F,G> {
@@ -59,7 +59,7 @@ pub struct NestedField<F,G> {
     inner_field: G,
 }
 
-impl<F,G> Clone for NestedField<F,G>
+impl<F, G> Clone for NestedField<F,G>
 where
     F: Clone,
     G: Clone
@@ -84,13 +84,29 @@ where
     }
 }
 
-pub trait Nester<R, U, F, O>
+impl<F, G, R, S, T> Member<R> for NestedField<F, G>
+where
+    F: Field<R, Value=S> + 'static,
+    G: Member<S, Value=T>,
+    S: 'static
+{
+    fn accept_visitor<V: MemberVisitor<Self, R, <Self as Field<R>>::Value>>(&self, visitor: &mut V) {
+        let mut n = NestedMemberVisitor {
+            parent: visitor,
+            field: self,
+            _marker: Default::default(),
+        };
+        self.inner_field.accept_visitor(&mut n);
+    }
+}
+
+pub trait Nester<R, U, F>
 where
     F: Field<U, Value=R>,
 {
-    fn nest<G,T,P>(&self, nested_field: G) -> NestedField<F, G>
+    fn nest<G,T>(&self, nested_field: G) -> NestedField<F, G>
     where
-        G: Field<R, Value=T>,
+        G: Field<R, Value=T> + 'static,
         R: 'static;
 }
 
@@ -99,13 +115,13 @@ struct NesterImpl<F>
     outer_field: F
 }
 
-impl<R, U, F, O> Nester<R,U,F,O> for NesterImpl<F>
+impl<R, U, F> Nester<R,U,F> for NesterImpl<F>
 where
     F: Field<U, Value=R> + Clone,
 {
-    fn nest<G,T,P>(&self, inner_field: G) -> NestedField<F, G>
+    fn nest<G,T>(&self, inner_field: G) -> NestedField<F, G>
     where
-        G: Field<R, Value=T>,
+        G: Field<R, Value=T> + 'static,
         R: 'static
     {
         NestedField {
@@ -134,33 +150,6 @@ pub trait Filter<R> {
 pub trait FilterClass<R> {
     fn instantiate(&self, rhs: &str) -> Result<Box<dyn Filter<R>>, FilterError>;
 }
-
-/*
-pub trait Queryable {
-    fn create_metadata() -> QueryableRecord<Self>;
-
-    fn create_filter_from_query_pair(
-        lhs: &str,
-        rhs: &str,
-    ) -> Result<Box<dyn Filter<Self>>, FilterError> {
-        let query_parts = lhs.splitn(2, "__").collect::<Vec<_>>();
-        if query_parts.len() < 2 {
-            Self::create_metadata().create_filter(lhs, None, rhs)
-        } else {
-            Self::create_metadata().create_filter(query_parts[0], Some(query_parts[1]), rhs)
-        }
-    }
-
-    fn create_filter_from_query(expr: &str) -> Result<Box<dyn Filter<Self>>, FilterError> {
-        let parts = expr.splitn(2, '=').collect::<Vec<_>>();
-        if parts.len() != 2 {
-            Err(FilterError::MissingEquals)
-        } else {
-            Self::create_filter_from_query_pair(parts[0], parts[1])
-        }
-    }
-}
- */
 
 pub struct FilterImpl<F, O> {
     field: F,
@@ -214,14 +203,14 @@ pub struct QueryableMember<R> {
 }
 
 impl<R> QueryableMember<R> {
-    pub fn new<F, O, T>(f: F, defop: O) -> Self
+    pub fn new<F, O, T>(f: &F, defop: O) -> Self
     where
         F: Member<R, Value=T> + 'static,
         O: OperatorClass<T> + 'static,
         <O as OperatorClass<T>>::Instance: 'static
     {
         let mut res = Self {
-            default: Box::new(FilterClassImpl::new(f, defop)),
+            default: Box::new(FilterClassImpl::new(f.clone(), defop)),
             operators: BTreeMap::new(),
         };
         f.accept_visitor(&mut res);
@@ -284,6 +273,28 @@ impl<R: Record> QueryableRecord<R> {
             .ok_or_else(|| FilterError::NoField(field.to_string()))?
             .create_filter(operator, rhs)
     }
+
+    fn create_filter_from_query_pair(
+        &self,
+        lhs: &str,
+        rhs: &str,
+    ) -> Result<Box<dyn Filter<R>>, FilterError> {
+        let query_parts = lhs.splitn(2, "__").collect::<Vec<_>>();
+        if query_parts.len() < 2 {
+            self.create_filter(lhs, None, rhs)
+        } else {
+            self.create_filter(query_parts[0], Some(query_parts[1]), rhs)
+        }
+    }
+
+    fn create_filter_from_query(&self, expr: &str) -> Result<Box<dyn Filter<R>>, FilterError> {
+        let parts = expr.splitn(2, '=').collect::<Vec<_>>();
+        if parts.len() != 2 {
+            Err(FilterError::MissingEquals)
+        } else {
+            self.create_filter_from_query_pair(parts[0], parts[1])
+        }
+    }
 }
 
 impl<R: Record> RecordVisitor<R> for QueryableRecord<R> {
@@ -293,13 +304,13 @@ impl<R: Record> RecordVisitor<R> for QueryableRecord<R> {
         O: OperatorClass<T> + 'static,
         <O as OperatorClass<T>>::Instance: 'static,
     {
-        self.fields.insert(name.to_string(), QueryableMember::new(field.clone(), defop));
+        self.fields.insert(name.to_string(), QueryableMember::new(field, defop));
     }
 
     fn visit_record<F, T>(&mut self, name: &str, field: &F, inner_record: &T)
     where
         F: Member<R, Value=T> + Clone + 'static,
-        T: Record
+        T: Record + 'static
     {
         let mut n = NestedRecordVisitor {
             parent: self,
@@ -324,13 +335,15 @@ struct NestedRecordVisitor<'a, F, R, P>
 
 impl<'a, R, G, P, S> RecordVisitor<S> for NestedRecordVisitor<'a, G, R, P>
 where
-    G: Field<R, Value=S> + Clone,
-    P: RecordVisitor<R>
+    G: Field<R, Value=S> + Clone + 'static,
+    P: RecordVisitor<R>,
+    S: 'static
 {
     fn visit_member<F, O, T>(&mut self, name: &str, field: &F, defop: O)
     where
         F: Member<S, Value=T> + Clone + 'static,
-        O: OperatorClass<T>
+        O: OperatorClass<T> + 'static,
+        <O as OperatorClass<T>>::Instance: 'static
     {
         self.parent.visit_member(format!("{}__{}", self.prefix, name).as_str(), 
                                  &self.nester.nest(field.clone()), defop);
@@ -339,11 +352,12 @@ where
     fn visit_record<F,T>(&mut self, name: &str, field: &F, inner_record: &T)
     where
         F: Member<S, Value=T> + Clone + 'static,
-        T: Record
+        T: Record + 'static
     {
+        let name = format!("{}__{}", self.prefix, name);
         let mut n = NestedRecordVisitor {
             parent: self,
-            prefix: format!("{}__{}", self.prefix, name),
+            prefix: name,
             nester: NesterImpl {
                 outer_field: field.clone()
             },
@@ -354,3 +368,25 @@ where
     }
 }
 
+struct NestedMemberVisitor<'a, F, G, R, P> {
+    parent: &'a mut P,
+    field: &'a NestedField<F, G>,
+    _marker: core::marker::PhantomData<R>
+}
+
+impl<'a, F, G, P, R, S, T> MemberVisitor<G, S, T> for NestedMemberVisitor<'a, F, G, R, P>
+where
+    P: MemberVisitor<NestedField<F,G>, R, T>,
+    F: Field<R, Value=S> + 'static,
+    G: Member<S, Value=T>,
+    S: 'static
+{
+    fn visit_operator<O>(&mut self, name: &str, _f: &G, op: O)
+    where
+        G: 'static,
+        O: OperatorClass<T> + 'static, 
+        <O as OperatorClass<T>>::Instance: 'static
+    {
+        self.parent.visit_operator(name, self.field, op);
+    }
+}
