@@ -148,7 +148,7 @@ mod tests {
             int_field: 4,
             foo: 11,
         };
-        let qr = MyRecord2::create_metadata();
+        let qr = QueryableRecord::<MyRecord2<_>>::new();
 
         let filter = qr.create_filter("int_field", None, "4").unwrap();
         assert!(filter.filter_one(&r));
@@ -169,11 +169,12 @@ mod tests {
             int_field: -1,
             foo: 12,
         };
-        let filter = MyRecord2::create_filter_from_query_pair("int_field", "4").unwrap();
+        let qr = QueryableRecord::<MyRecord2<_>>::new();
+        let filter = qr.create_filter_from_query_pair("int_field", "4").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
 
-        let filter = MyRecord2::create_filter_from_query("bar=11").unwrap();
+        let filter = qr.create_filter_from_query("bar=11").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
     }
@@ -195,7 +196,8 @@ mod tests {
             int_field: -1,
             foo: 1,
         };
-        let filter = MyRecord2::create_filter_from_query("bar__in=1,2,11").unwrap();
+        let qr = QueryableRecord::<MyRecord2<_>>::new();
+        let filter = qr.create_filter_from_query("bar__in=1,2,11").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
@@ -232,7 +234,8 @@ mod tests {
             int_field: -1,
             foo: 1,
         };
-        let filter = MyRecord3::create_filter_from_query("bar__in=1,2,11").unwrap();
+        let qr = QueryableRecord::<MyRecord3<_>>::new();
+        let filter = qr.create_filter_from_query("bar__in=1,2,11").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
@@ -255,7 +258,8 @@ mod tests {
             int_field: 1,
             foo: 1,
         };
-        let filter = MyRecord3::create_filter_from_query("int_field=1,4").unwrap();
+        let qr = QueryableRecord::<MyRecord3<_>>::new();
+        let filter = qr.create_filter_from_query("int_field=1,4").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
@@ -298,7 +302,8 @@ mod tests {
             int_field: 1,
             foo: 1,
         };
-        let filter = MyRecord4::create_filter_from_query("int_field=1,4").unwrap();
+        let qr = QueryableRecord::<MyRecord4<_>>::new();
+        let filter = qr.create_filter_from_query("int_field=1,4").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
@@ -321,47 +326,48 @@ mod tests {
             int_field: 1,
             foo: 1,
         };
-        let filter = MyRecord4::create_filter_from_query("int_field__eq=1").unwrap();
+        let qr = QueryableRecord::<MyRecord4<_>>::new();
+        let filter = qr.create_filter_from_query("int_field__eq=1").unwrap();
         assert!(!filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("int_field__lt=1").unwrap();
+        let filter = qr.create_filter_from_query("int_field__lt=1").unwrap();
         assert!(!filter.filter_one(&r));
         assert!(filter.filter_one(&r2));
         assert!(!filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("int_field__lte=1").unwrap();
+        let filter = qr.create_filter_from_query("int_field__lte=1").unwrap();
         assert!(!filter.filter_one(&r));
         assert!(filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("int_field__gt=1").unwrap();
+        let filter = qr.create_filter_from_query("int_field__gt=1").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(!filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("int_field__gte=1").unwrap();
+        let filter = qr.create_filter_from_query("int_field__gte=1").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("MYSTRING__contains=est").unwrap();
+        let filter = qr.create_filter_from_query("MYSTRING__contains=est").unwrap();
         assert!(filter.filter_one(&r));
         assert!(filter.filter_one(&r2));
         assert!(!filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("MYSTRING__icontains=EST").unwrap();
+        let filter = qr.create_filter_from_query("MYSTRING__icontains=EST").unwrap();
         assert!(filter.filter_one(&r));
         assert!(filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("MYSTRING__startswith=tes").unwrap();
+        let filter = qr.create_filter_from_query("MYSTRING__startswith=tes").unwrap();
         assert!(filter.filter_one(&r));
         assert!(filter.filter_one(&r2));
         assert!(!filter.filter_one(&r3));
 
-        let filter = MyRecord4::create_filter_from_query("MYSTRING__endswith=3").unwrap();
+        let filter = qr.create_filter_from_query("MYSTRING__endswith=3").unwrap();
         assert!(filter.filter_one(&r));
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));

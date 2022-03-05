@@ -277,8 +277,8 @@ pub fn go(input: TokenStream) -> TokenStream {
 
             structs.extend(quote::quote! {
                 struct MyRecord;
-                impl Record for MyRecord {
-                    fn accept_visitor<V: RecordVisitor<Self>>(&self, visitor: &mut V) where Self: Sized {
+                impl #generics Record<#ident #generics> for MyRecord #wc {
+                    fn accept_visitor<V: RecordVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
                         #body
                     }
                 }

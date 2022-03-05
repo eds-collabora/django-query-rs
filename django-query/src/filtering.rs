@@ -37,8 +37,8 @@ where
         <O as OperatorClass<T>>::Instance: 'static;
 }
 
-pub trait Record {
-    fn accept_visitor<V: RecordVisitor<Self>>(&self, visitor: &mut V) where Self: Sized;
+pub trait Record<R> {
+    fn accept_visitor<V: RecordVisitor<R>>(&self, visitor: &mut V) where Self: Sized;
 }
 
 pub trait RecordVisitor<R> {
@@ -48,10 +48,11 @@ pub trait RecordVisitor<R> {
         O: OperatorClass<T> + 'static,
         <O as OperatorClass<T>>::Instance: 'static;
 
-    fn visit_record<F, T>(&mut self, name: &str, field: &F, inner_record: &T)
+    fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
     where
-        F: Member<R, Value=T> + Clone + 'static,
-        T: Record + 'static;
+        F: Member<R, Value=U> + Clone + 'static,
+        T: Record<U> + 'static,
+        U: 'static;
 }
 
 pub struct NestedField<F,G> {
@@ -197,8 +198,8 @@ where
     }
 }
 
-pub trait Queryable {
-    type Meta: Record;
+pub trait Queryable: Sized {
+    type Meta: Record<Self>;
     fn get_meta() -> Self::Meta;
 }
 
@@ -255,15 +256,15 @@ where
 
 pub struct QueryableRecord<R> {
     // map from field names to supported operators
-    fields: BTreeMap<String, QueryableMember<R>>,
+    fields: BTreeMap<String, QueryableMember<R>>
 }
 
-impl<R: Record> QueryableRecord<R> {
-    pub fn new(r: R) -> Self {
+impl<R: Queryable> QueryableRecord<R> {
+    pub fn new() -> Self {
         let mut res = Self {
             fields: BTreeMap::new(),
         };
-        r.accept_visitor(&mut res);
+        R::get_meta().accept_visitor(&mut res);
         res
     }
 
@@ -279,7 +280,7 @@ impl<R: Record> QueryableRecord<R> {
             .create_filter(operator, rhs)
     }
 
-    fn create_filter_from_query_pair(
+    pub fn create_filter_from_query_pair(
         &self,
         lhs: &str,
         rhs: &str,
@@ -292,7 +293,7 @@ impl<R: Record> QueryableRecord<R> {
         }
     }
 
-    fn create_filter_from_query(&self, expr: &str) -> Result<Box<dyn Filter<R>>, FilterError> {
+    pub fn create_filter_from_query(&self, expr: &str) -> Result<Box<dyn Filter<R>>, FilterError> {
         let parts = expr.splitn(2, '=').collect::<Vec<_>>();
         if parts.len() != 2 {
             Err(FilterError::MissingEquals)
@@ -302,7 +303,7 @@ impl<R: Record> QueryableRecord<R> {
     }
 }
 
-impl<R: Record> RecordVisitor<R> for QueryableRecord<R> {
+impl<R> RecordVisitor<R> for QueryableRecord<R> {
     fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
     where
         F: Member<R, Value=T> + Clone + 'static,
@@ -312,10 +313,11 @@ impl<R: Record> RecordVisitor<R> for QueryableRecord<R> {
         self.fields.insert(name.to_string(), QueryableMember::new(field, defop));
     }
 
-    fn visit_record<F, T>(&mut self, name: &str, field: &F, inner_record: &T)
+    fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
     where
-        F: Field<R, Value=T> + Clone + 'static,
-        T: Record + 'static
+        F: Field<R, Value=U> + Clone + 'static,
+        T: Record<U> + 'static,
+        U: 'static
     {
         let mut n = NestedRecordVisitor {
             parent: self,
@@ -354,10 +356,11 @@ where
                                  &self.nester.nest(field.clone()), defop);
     }
 
-    fn visit_record<F,T>(&mut self, name: &str, field: &F, inner_record: &T)
+    fn visit_record<F,T,U>(&mut self, name: &str, field: &F, inner_record: &T)
     where
-        F: Member<S, Value=T> + Clone + 'static,
-        T: Record + 'static
+        F: Member<S, Value=U> + Clone + 'static,
+        T: Record<U> + 'static,
+        U: 'static
     {
         let name = format!("{}__{}", self.prefix, name);
         let mut n = NestedRecordVisitor {
