@@ -21,7 +21,7 @@ pub trait Field<R> {
     fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
 }
 
-pub trait ScalarField<R> {
+pub trait ScalarField<R: ?Sized> {
     type Value;
     fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value;
 }
@@ -40,17 +40,178 @@ pub struct NestedField<F,G> {
     outer_field: F,
     inner_field: G,
 }
-    
+
+impl<F,G> Clone for NestedField<F,G>
+where
+    F: Clone,
+    G: Clone
+{
+    fn clone(&self) -> Self {
+        Self {
+            outer_field: self.outer_field.clone(),
+            inner_field: self.inner_field.clone()
+        }
+    }
+}
+
 impl<F, G, R, S, T> ScalarField<R> for NestedField<F, G>
 where
     F: ScalarField<R, Value=S>,
-    G: ScalarField<S, Value=T>
+    G: ScalarField<S, Value=T>,
+    S: 'static
 {
-    type Value = <G as ScalarField<S>>::Value;
+    type Value = T;
     fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value {
         self.inner_field.value(self.outer_field.value(data))
     }
 }
+
+pub trait Nester<R, U, F>
+where
+    R: ?Sized,
+    F: ScalarField<U, Value=R>,
+{
+    fn nest<G,T>(&self, nested_field: G) -> NestedField<F, G>
+    where
+        G: ScalarField<R, Value=T>,
+        R: 'static;
+}
+
+struct NesterImpl<F>
+{
+    outer_field: F
+}
+
+impl<R, U, F> Nester<R,U,F> for NesterImpl<F>
+where
+    F: ScalarField<U, Value=R> + Clone,
+{
+    fn nest<G,T>(&self, inner_field: G) -> NestedField<F, G>
+    where
+        G: ScalarField<R, Value=T>,
+        R: 'static
+    {
+        NestedField {
+            outer_field: self.outer_field.clone(),
+            inner_field
+        }
+    }
+}
+
+
+pub trait Traversable {
+    fn complete_qr<N, U, F>(prefix: &str, nf: N, q: &mut QueryableRecord<U>)
+    where
+        N: Nester<Self, U, F>,
+        F: ScalarField<U, Value=Self> + Clone + 'static;
+        
+}
+
+struct TestRecord {
+    mem: TestRecord2
+}
+
+struct TestRecord2 {
+    s: String
+}
+
+#[derive(Clone)]
+struct TRStringField;
+
+impl ScalarField<TestRecord2> for TRStringField {
+    type Value = String;
+    fn value<'a>(&'_ self, data: &'a TestRecord2) -> &'a String {
+        &data.s
+    }
+}
+
+impl Traversable for TestRecord2 {
+    fn complete_qr<N, U, F>(prefix: &str, nf: N, q: &mut QueryableRecord<U>)
+    where
+        N: Nester<Self, U, F>,
+        F: ScalarField<U, Value=Self> + Clone + 'static
+    {
+        let qf1 = QueryableField::new(FilterClassImpl::new(nf.nest(TRStringField), crate::operators::Eq));
+          
+        q.add_field(format!("{}__s", prefix).as_str(), qf1)
+    }
+}
+
+// struct TestRecord {
+//     mem: TestRecord2
+// }
+
+// struct MemField;
+
+// impl ScalarField<TestRecord> for MemField {
+//     type Value = TestRecord2;
+//     fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value {
+//         &data.mem
+//     }
+// }
+
+// struct TestRecord2 {
+//     mem: String
+// }
+
+// impl Nester<TestRecord2> for NesterImpl<TestRecord, MemField>
+// {
+//     fn nest<F,G,T,U>(&self, nested_field: F) -> G
+//     where
+//         F: ScalarField<TestRecord2, Value=T>,
+//         G: ScalarField<U, Value=T>,
+//     {
+        
+//         /* NestedField<B, F>
+//              => F = B
+//              => G = R
+      
+//              U = A
+
+//          Refusing to identify NestedField<B,F> as G
+//         */
+
+//         let x: Box<dyn ScalarField<A, Value=T>> = Box::new(NestedField::<B, F> {
+//             outer_field: self.outer_field.clone(),
+//             inner_field: nested_field
+//         });
+
+//         let y: Box<dyn ScalarField<U, Value=T>> = Box::new(NestedField::<B, F> {
+//             outer_field: self.outer_field.clone(),
+//             inner_field: nested_field
+//         });
+        
+//         let f: G = NestedField::<B, F> {
+//             outer_field: self.outer_field.clone(),
+//             inner_field: nested_field
+//         };
+//         f
+//     }
+// }
+
+// const _: () = {
+//     struct Record {
+//         m: String
+//     }
+//     struct MField;
+//     impl ScalarField<Record> for MField {
+//         type Value = String;
+//         fn value<'a>(&'_ self, data: &'a Record) -> &'a Self::Value {
+//             &data.m
+//         }
+//     }
+//     struct OuterRecord {
+//         r: Record
+//     }
+//     struct RField;
+//     impl ScalarField<OuterRecord> for RField {
+//         type Value = Record;
+//         fn value<'a>(&'_ self, data: &'a OuterRecord) -> &'a Self::Value {
+//             &data.r
+//         }
+//     }
+        
+// };
 
 /*
 pub struct VectorField<F> {
