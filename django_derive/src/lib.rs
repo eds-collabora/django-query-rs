@@ -30,6 +30,7 @@ enum DjangoItem {
     Operators(Vec<DjangoOperator>),
     DefaultOperator1(syn::Ident),
     DefaultOperator2(syn::Path),
+    Traversed,
     Ignored,
 }
 
@@ -57,6 +58,9 @@ impl syn::parse::Parse for DjangoItem {
                 eprintln!("Got exclude");
                 Ok(DjangoItem::Ignored)
             },
+            "traverse" => {
+                Ok(DjangoItem::Traversed)
+            },
             "op" => {
                 // op(in = MyInOperatorClass)
                 let content;
@@ -79,6 +83,7 @@ enum DjangoMeta {
         default_operator: (Option<syn::Ident>, Option<syn::Path>),
         operators: BTreeMap<String, Option<syn::Path>>,
     },
+    Traversed, 
     Excluded
 }
 
@@ -88,6 +93,7 @@ impl syn::parse::Parse for DjangoMeta {
         let mut operators = BTreeMap::new();
         let mut defop = (None, None);
         let mut excluded = false;
+        let mut traversed = false;
         let punc =
             syn::punctuated::Punctuated::<DjangoItem, syn::Token![,]>::parse_terminated(input)?;
 
@@ -118,11 +124,17 @@ impl syn::parse::Parse for DjangoMeta {
                     eprintln!("Saw ignored");
                     excluded = true;
                 }
+                DjangoItem::Traversed => {
+                    traversed = true;
+                },
             }
         }
         if excluded {
             eprintln!("Excluded");
             Ok(Self::Excluded)
+        } else if traversed {
+            eprintln!("Traversed");
+            Ok(Self::Traversed)
         } else {
             Ok(Self::Included {
                 name: field_name,
@@ -171,6 +183,7 @@ pub fn go(input: TokenStream) -> TokenStream {
                 let mut operators = BTreeMap::new();
                 let mut defop = None;
                 let mut excluded = false;
+                let mut traversed = false;
                 
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
@@ -202,6 +215,9 @@ pub fn go(input: TokenStream) -> TokenStream {
                                     _ => {}
                                 }
                             },
+                            DjangoMeta::Traversed => {
+                                traversed = true;
+                            },
                             DjangoMeta::Excluded => {
                                 eprintln!("Marked excluded");
                                 excluded = true;
@@ -213,40 +229,60 @@ pub fn go(input: TokenStream) -> TokenStream {
                     eprintln!("skipped");
                     continue;
                 }
+                
                 let fieldtype = &field.ty;
                 let structname =
                     syn::Ident::new(&format!("{}Field", fieldid), pm2::Span::call_site());
 
+                let mut fieldbody = pm2::TokenStream::new();
+
+                for (key, value) in operators {
+                    fieldbody.extend(quote::quote! {
+                        visitor.visit_operator(#key, self, #value);
+                    })
+                }
+                
                 structs.extend(quote::quote! {
                     #[derive(Clone)]
                     struct #structname;
                     #[automatically_derived]
-                    impl #generics ::django_query::ScalarField<#ident #generics> for #structname #wc {
+                    impl #generics ::django_query::Field<#ident #generics> for #structname #wc {
                         type Value = #fieldtype;
                         fn value<'a>(&self, data: &'a #ident #generics) -> &'a #fieldtype {
                             &data.#fieldid
                         }
                     }
                 });
+                if !traversed {
+                    structs.extend(quote::quote! {
+                        #[automatically_derived]
+                        impl #generics ::django_query::Member<#ident #generics> for #structname #wc {
+                            fn accept_visitor<V: MemberVisitor<Self, #ident #generics, <Self as Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
+                                #fieldbody
+                            }
+                        }
+                    });
+                }
 
                 let defop = if let Some(op) = defop {
                     op
                 } else {
                     syn::parse_quote! {::django_query::operators::Eq}
                 };
-
+                
                 body.extend(quote::quote! {
-                    let mut qf = ::django_query::QueryableField::new(::django_query::filtering::FilterClassImpl::new(#structname, #defop));
+                    visitor.visit_member(#fieldname, &#structname, #defop);
                 });
-                for (key, value) in operators {
-                    body.extend(quote::quote! {
-                        qf.add_operator(#key, ::django_query::filtering::FilterClassImpl::new(#structname, #value));
-                    });
-                }
-                body.extend(quote::quote! {
-                    qr.add_field(#fieldname, qf);
-                })
             }
+
+            structs.extend(quote::quote! {
+                struct MyRecord;
+                impl Record for MyRecord {
+                    fn accept_visitor<V: RecordVisitor<Self>>(&self, visitor: &mut V) where Self: Sized {
+                        #body
+                    }
+                }
+            });
         } else {
             panic!("Queryable can only be derived for structs with named fields.");
         }
@@ -259,10 +295,9 @@ pub fn go(input: TokenStream) -> TokenStream {
             #structs
             #[automatically_derived]
             impl #generics Queryable for #ident #generics #wc {
-                fn create_metadata() -> ::django_query::QueryableRecord<Self> {
-                    let mut qr = ::django_query::QueryableRecord::new();
-                    #body
-                    qr
+                type Meta = MyRecord;
+                fn get_meta() -> Self::Meta {
+                    MyRecord
                 }
             }
         };

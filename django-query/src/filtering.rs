@@ -197,6 +197,11 @@ where
     }
 }
 
+pub trait Queryable {
+    type Meta: Record;
+    fn get_meta() -> Self::Meta;
+}
+
 pub struct QueryableMember<R> {
     default: Box<dyn FilterClass<R>>,
     operators: BTreeMap<String, Box<dyn FilterClass<R>>>,
@@ -309,7 +314,7 @@ impl<R: Record> RecordVisitor<R> for QueryableRecord<R> {
 
     fn visit_record<F, T>(&mut self, name: &str, field: &F, inner_record: &T)
     where
-        F: Member<R, Value=T> + Clone + 'static,
+        F: Field<R, Value=T> + Clone + 'static,
         T: Record + 'static
     {
         let mut n = NestedRecordVisitor {
