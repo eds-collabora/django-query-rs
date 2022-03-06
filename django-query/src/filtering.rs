@@ -16,8 +16,7 @@ pub enum FilterError {
     Instantiation(#[from] anyhow::Error),
 }
 
-pub trait Field<R>: Clone
-{
+pub trait Field<R>: Clone {
     type Value;
     fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
 }
@@ -419,37 +418,41 @@ where
     }
 }
 
-struct VecField<F> {
+struct IterableField<F> {
     inner_field: F
 }
 
-impl<F> Clone for VecField<F>
+impl<F> Clone for IterableField<F>
 where
     F: Clone
 {
     fn clone(&self) -> Self {
-        VecField {
+        IterableField {
             inner_field: self.inner_field.clone()
         }
     }
 }
 
-impl<F, R, T> Field<Vec<R>> for VecField<F>
+impl<F, R, T, I> Field<I> for IterableField<F>
 where
-    F: Field<R, Value=T>
+    F: Field<R, Value=T>,
+    R: 'static,
+    for<'i> &'i I: IntoIterator<Item=&'i R>
 {
     type Value = T;
-    fn apply<O: Operator<T>>(&'_ self, op: &O, data: &Vec<R>) -> bool {
-        data.into_iter().any(|x| self.inner_field.apply(op, x))
+    fn apply<O: Operator<T>>(&'_ self, op: &O, data: &I) -> bool {
+        data.into_iter().any(|x| self.inner_field.apply(op, &x))
     }
 }
 
-impl<F, R, T> Member<Vec<R>> for VecField<F>
+impl<F, R, T, I> Member<I> for IterableField<F>
 where
-    F: Member<R, Value=T> + 'static
+    F: Member<R, Value=T> + 'static,
+    R: 'static,
+    for <'i> &'i I: IntoIterator<Item=&'i R>
 {
-    fn accept_visitor<V: MemberVisitor<Self, Vec<R>, <Self as Field<Vec<R>>>::Value>>(&self, visitor: &mut V) {
-        let mut n = VecMemberVisitor {
+    fn accept_visitor<V: MemberVisitor<Self, I, <Self as Field<I>>::Value>>(&self, visitor: &mut V) {
+        let mut n = IterableMemberVisitor {
             parent: visitor,
             field: self,
             _marker: Default::default()
@@ -458,16 +461,18 @@ where
     }
 }
 
-struct VecMemberVisitor<'a, F, R, P> {
+struct IterableMemberVisitor<'a, F, I, P> {
     parent: &'a mut P,
-    field: &'a VecField<F>,
-    _marker: core::marker::PhantomData<R>
+    field: &'a IterableField<F>,
+    _marker: core::marker::PhantomData<I>
 }
 
-impl<'a, F, P, R, T> MemberVisitor<F, R, T> for VecMemberVisitor<'a, F, R, P>
+impl<'a, F, P, R, T, I> MemberVisitor<F, R, T> for IterableMemberVisitor<'a, F, I, P>
 where
-    P: MemberVisitor<VecField<F>, Vec<R>, T>,
-    F: Member<R, Value=T> + 'static
+    P: MemberVisitor<IterableField<F>, I, T>,
+    F: Member<R, Value=T> + 'static,
+    R: 'static,
+    for<'i> &'i I: IntoIterator<Item=&'i R>
 {
     fn visit_operator<O>(&mut self, name: &str, _f: &F, op: O)
     where
@@ -479,30 +484,35 @@ where
     }
 }
 
-pub struct VecRecord;
+pub struct IterableRecord;
 
-impl<R> Record<Vec<R>> for VecRecord
+impl<R, I> Record<I> for IterableRecord
 where
-    R: Queryable
+    R: Queryable + 'static,
+    for<'i> &'i I: IntoIterator<Item=&'i R>
 {
-    fn accept_visitor<V: RecordVisitor<Vec<R>>>(&self, visitor: &mut V)
+    fn accept_visitor<V: RecordVisitor<I>>(&self, visitor: &mut V)
     where
         Self: Sized
     {
-        let mut n = VecRecordVisitor {
+        let mut n = IterableRecordVisitor {
             parent: visitor,
+            _marker: Default::default()
         };
         R::get_meta().accept_visitor(&mut n);
     }
 }
 
-struct VecRecordVisitor<'a, P> {
-    parent: &'a mut P
+struct IterableRecordVisitor<'a, P, I> {
+    parent: &'a mut P,
+    _marker: core::marker::PhantomData<I>
 }
 
-impl<'a, P, R> RecordVisitor<R> for VecRecordVisitor<'a, P>
+impl<'a, P, R, I> RecordVisitor<R> for IterableRecordVisitor<'a, P, I>
 where
-    P: RecordVisitor<Vec<R>>
+    P: RecordVisitor<I>,
+    R: 'static,
+    for<'i> &'i I: IntoIterator<Item=&'i R>
 {
     fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
     where
@@ -510,7 +520,7 @@ where
         O: OperatorClass<T> + 'static,
         <O as OperatorClass<T>>::Instance: 'static
     {
-        self.parent.visit_member(name, &VecField { inner_field: field.clone() }, defop);
+        self.parent.visit_member(name, &IterableField { inner_field: field.clone() }, defop);
     }
 
     fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
@@ -519,7 +529,7 @@ where
         T: Record<U> + 'static,
         U: 'static
     {
-        self.parent.visit_record(name, &VecField { inner_field: field.clone() }, inner_record)
+        self.parent.visit_record(name, &IterableField { inner_field: field.clone() }, inner_record)
     }
 }
 
@@ -562,12 +572,13 @@ pub fn print_queryable<Q: Queryable>() {
     Q::get_meta().accept_visitor(&mut pv)
 }
 
-impl<T> Queryable for Vec<T>
+impl<T, I> Queryable for I
 where
-    T: Queryable
+    T: Queryable + 'static,
+    for<'i> &'i I: IntoIterator<Item=&'i T>
 {
-    type Meta = VecRecord;
+    type Meta = IterableRecord;
     fn get_meta() -> Self::Meta {
-        VecRecord
+        IterableRecord
     }
 }
