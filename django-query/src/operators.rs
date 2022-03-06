@@ -50,28 +50,6 @@ where
     }
 }
 
-/*
-struct OperatorAny<O> {
-    op: O
-}
-
-impl<O> OperatorAny<O> {
-    pub fn new(op: O) -> Self {
-        Self {
-            op
-        }
-    }
-}
-
-impl<T, O> Operator<Vec<T>> for OperatorAny<O>
-where
-    O: Operator<T>
-{
-    fn apply(&self, value: &Vec<T>) -> bool {
-        value.iter().any(|x| self.op.apply(x))
-    }
-}
-*/    
 pub struct Eq;
 
 impl<T> OperatorClass<T> for Eq
@@ -378,6 +356,45 @@ where
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
         Ok(GreaterEqImpl {
             target: T::from_str(rhs).map_err(|e| FilterError::Instantiation(e.into()))?,
+        })
+    }
+}
+
+/* --------------------------------------- */
+
+pub struct OperatorAnyImpl<O> {
+    op: O
+}
+
+impl<O> OperatorAnyImpl<O> {
+    pub fn new(op: O) -> Self {
+        Self {
+            op
+        }
+    }
+}
+
+impl<T, O> Operator<Vec<T>> for OperatorAnyImpl<O>
+where
+    O: Operator<T>
+{
+    fn apply(&self, value: &Vec<T>) -> bool {
+        value.iter().any(|x| self.op.apply(x))
+    }
+}
+
+pub struct OperatorAny<O> {
+    opcls: O
+}
+
+impl<T, O> OperatorClass<Vec<T>> for OperatorAny<O>
+where
+    O: OperatorClass<T>
+{
+    type Instance = OperatorAnyImpl<<O as OperatorClass<T>>::Instance>;
+    fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
+        Ok(OperatorAnyImpl {
+            op: self.opcls.instantiate(rhs)?
         })
     }
 }

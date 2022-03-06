@@ -402,3 +402,94 @@ where
         self.parent.visit_operator(name, self.field, op);
     }
 }
+
+/* To handle containers, we need to do two things:
+   - Vec<T> -> Vec<U> to extract each field into a Vec
+     PROBLEM: We would have &Vec<T> and we get Vec<&U> instead
+   - Replace operators with wrapped operators
+
+*/
+
+struct VecField<F> {
+    inner_field: F
+}
+
+impl<F> Clone for VecField<F>
+where
+    F: Clone
+{
+    fn clone(&self) -> Self {
+        VecField {
+            inner_field: self.inner_field.clone()
+        }
+    }
+}
+
+impl<F, R, T> Field<Vec<R>> for VecField<F>
+where
+    F: Field<R, Value=T>,
+    T: Clone
+{
+    type Value = Vec<T>;
+    fn value<'a>(&'_ self, data: &'a Vec<R>) -> &'a Self::Value {
+        &data.into_iter().map(|x| self.inner_field.value(x)).cloned().collect::<Vec<T>>()
+    }
+}
+
+impl<F, R, T> Member<Vec<R>> for VecField<F>
+where
+    F: Member<R, Value=T> + 'static,
+    T: Clone
+{
+    fn accept_visitor<V: MemberVisitor<Self, Vec<R>, <Self as Field<Vec<R>>>::Value>>(&self, visitor: &mut V) {
+        let mut n = VecMemberVisitor {
+            parent: visitor,
+            field: self,
+            _marker: Default::default()
+        };
+        self.inner_field.accept_visitor(&mut n);
+    }
+}
+
+struct VecMemberVisitor<'a, F, R, P> {
+    parent: &'a mut P,
+    field: &'a VecField<F>,
+    _marker: core::marker::PhantomData<R>
+}
+
+impl<'a, F, P, R, T> MemberVisitor<F, R, T> for VecMemberVisitor<'a, F, R, P>
+where
+    P: MemberVisitor<VecField<F>, Vec<R>, Vec<T>>,
+    F: Member<R, Value=T> + 'static,
+    T: Clone
+{
+    fn visit_operator<O>(&mut self, name: &str, _f: &F, op: O)
+    where
+        F: 'static,
+        O: OperatorClass<T> + 'static, 
+        <O as OperatorClass<T>>::Instance: 'static
+    {
+        self.parent.visit_operator(name, self.field, crate::operators::OperatorAny { opcls: op });
+    }
+}
+
+// impl Record<Vec<T>> for VecRecord
+// where
+//     T: Queryable
+// {
+//     fn accept_visitor<V: RecordVisitor<Vec<T>>>(&self, visitor: &mut V)
+//     where
+//         Self: Sized
+//     {
+//     }
+// }
+
+// impl<T> Queryable for Vec<T>
+// where
+//     T: Queryable
+// {
+//     type Meta = VecRecord;
+//     fn get_meta() -> Self::Meta {
+//         VecRecord
+//     }
+// }
