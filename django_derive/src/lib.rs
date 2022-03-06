@@ -248,8 +248,8 @@ pub fn go(input: TokenStream) -> TokenStream {
                     #[automatically_derived]
                     impl #generics ::django_query::Field<#ident #generics> for #structname #wc {
                         type Value = #fieldtype;
-                        fn value<'a>(&self, data: &'a #ident #generics) -> &'a #fieldtype {
-                            &data.#fieldid
+                        fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &#ident #generics) -> bool {
+                            op.apply(&data.#fieldid)
                         }
                     }
                 });

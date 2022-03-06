@@ -362,39 +362,39 @@ where
 
 /* --------------------------------------- */
 
-pub struct OperatorAnyImpl<O> {
-    op: O
-}
+// pub struct OperatorAnyImpl<O> {
+//     op: O
+// }
 
-impl<O> OperatorAnyImpl<O> {
-    pub fn new(op: O) -> Self {
-        Self {
-            op
-        }
-    }
-}
+// impl<O> OperatorAnyImpl<O> {
+//     pub fn new(op: O) -> Self {
+//         Self {
+//             op
+//         }
+//     }
+// }
 
-impl<T, O> Operator<Vec<T>> for OperatorAnyImpl<O>
-where
-    O: Operator<T>
-{
-    fn apply(&self, value: &Vec<T>) -> bool {
-        value.iter().any(|x| self.op.apply(x))
-    }
-}
+// impl<T, O> Operator<Vec<T>> for OperatorAnyImpl<O>
+// where
+//     O: Operator<T>
+// {
+//     fn apply(&self, value: &Vec<T>) -> bool {
+//         value.iter().any(|x| self.op.apply(x))
+//     }
+// }
 
-pub struct OperatorAny<O> {
-    opcls: O
-}
+// pub struct OperatorAny<O> {
+//     opcls: O
+// }
 
-impl<T, O> OperatorClass<Vec<T>> for OperatorAny<O>
-where
-    O: OperatorClass<T>
-{
-    type Instance = OperatorAnyImpl<<O as OperatorClass<T>>::Instance>;
-    fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
-        Ok(OperatorAnyImpl {
-            op: self.opcls.instantiate(rhs)?
-        })
-    }
-}
+// impl<T, O> OperatorClass<Vec<T>> for OperatorAny<O>
+// where
+//     O: OperatorClass<T>
+// {
+//     type Instance = OperatorAnyImpl<<O as OperatorClass<T>>::Instance>;
+//     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
+//         Ok(OperatorAnyImpl {
+//             op: self.opcls.instantiate(rhs)?
+//         })
+//     }
+// }

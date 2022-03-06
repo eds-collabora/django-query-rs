@@ -410,4 +410,44 @@ mod tests {
         let filter = qr.create_filter_from_query("int_field=5").unwrap();
         assert!(!filter.filter_one(&r));
     }
+
+    #[derive(Queryable)]
+    struct MyRecord6
+    {
+        string_field: String,
+        #[django(traverse)]
+        foo: Vec::<MyNestedRecord>,
+    }
+    
+    #[test]
+    fn vector_nesting() {
+        let r = MyRecord6 {
+            string_field: "hello".to_string(),
+            foo: vec![
+                MyNestedRecord {
+                    string_field: "one".to_string(),
+                    int_field: 1
+                },
+                MyNestedRecord {
+                    string_field: "two".to_string(),
+                    int_field: 2
+                },
+                MyNestedRecord {
+                    string_field: "three".to_string(),
+                    int_field: 3
+                },
+            ]
+        };
+        print_queryable::<MyRecord6>();
+        
+        let qr = QueryableRecord::<MyRecord6>::new();
+        let filter = qr.create_filter_from_query("foo__int_field=1").unwrap();
+        assert!(filter.filter_one(&r));
+        let filter = qr.create_filter_from_query("foo__int_field=2").unwrap();
+        assert!(filter.filter_one(&r));
+        let filter = qr.create_filter_from_query("foo__int_field=3").unwrap();
+        assert!(filter.filter_one(&r));
+        let filter = qr.create_filter_from_query("foo__int_field=4").unwrap();
+        assert!(!filter.filter_one(&r));
+    }
 }

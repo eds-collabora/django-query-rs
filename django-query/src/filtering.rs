@@ -19,7 +19,7 @@ pub enum FilterError {
 pub trait Field<R>: Clone
 {
     type Value;
-    fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value;
+    fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
 }
 
 pub trait Member<R>: Field<R> {
@@ -73,6 +73,22 @@ where
     }
 }
 
+struct NestingOperator<'a, O, S, F> {
+    op: &'a O,
+    inner: F,
+    _marker: core::marker::PhantomData<S>
+}
+
+impl<'a, T,O,F,S> Operator<S> for NestingOperator<'a, O,S,F>
+where
+    O: Operator<T>,
+    F: Field<S, Value=T>
+{
+    fn apply(&self, value: &S) -> bool {
+        self.inner.apply(self.op, value)
+    }
+}       
+
 impl<F, G, R, S, T> Field<R> for NestedField<F, G>
 where
     F: Field<R, Value=S>,
@@ -80,8 +96,8 @@ where
     S: 'static
 {
     type Value = T;
-    fn value<'a>(&'_ self, data: &'a R) -> &'a Self::Value {
-        self.inner_field.value(self.outer_field.value(data))
+    fn apply<O: Operator<Self::Value>>(&'_ self, op: &O, data: &R) -> bool {
+        self.outer_field.apply(&NestingOperator { op, inner: self.inner_field.clone(), _marker: Default::default() }, data)
     }
 }
 
@@ -169,7 +185,7 @@ where
     O: Operator<T>,
 {
     fn filter_one(&self, data: &R) -> bool {
-        self.operator.apply(self.field.value(data))
+        self.field.apply(&self.operator, data)
     }
 }
 
@@ -403,13 +419,6 @@ where
     }
 }
 
-/* To handle containers, we need to do two things:
-   - Vec<T> -> Vec<U> to extract each field into a Vec
-     PROBLEM: We would have &Vec<T> and we get Vec<&U> instead
-   - Replace operators with wrapped operators
-
-*/
-
 struct VecField<F> {
     inner_field: F
 }
@@ -427,19 +436,17 @@ where
 
 impl<F, R, T> Field<Vec<R>> for VecField<F>
 where
-    F: Field<R, Value=T>,
-    T: Clone
+    F: Field<R, Value=T>
 {
-    type Value = Vec<T>;
-    fn value<'a>(&'_ self, data: &'a Vec<R>) -> &'a Self::Value {
-        &data.into_iter().map(|x| self.inner_field.value(x)).cloned().collect::<Vec<T>>()
+    type Value = T;
+    fn apply<O: Operator<T>>(&'_ self, op: &O, data: &Vec<R>) -> bool {
+        data.into_iter().any(|x| self.inner_field.apply(op, x))
     }
 }
 
 impl<F, R, T> Member<Vec<R>> for VecField<F>
 where
-    F: Member<R, Value=T> + 'static,
-    T: Clone
+    F: Member<R, Value=T> + 'static
 {
     fn accept_visitor<V: MemberVisitor<Self, Vec<R>, <Self as Field<Vec<R>>>::Value>>(&self, visitor: &mut V) {
         let mut n = VecMemberVisitor {
@@ -459,9 +466,8 @@ struct VecMemberVisitor<'a, F, R, P> {
 
 impl<'a, F, P, R, T> MemberVisitor<F, R, T> for VecMemberVisitor<'a, F, R, P>
 where
-    P: MemberVisitor<VecField<F>, Vec<R>, Vec<T>>,
-    F: Member<R, Value=T> + 'static,
-    T: Clone
+    P: MemberVisitor<VecField<F>, Vec<R>, T>,
+    F: Member<R, Value=T> + 'static
 {
     fn visit_operator<O>(&mut self, name: &str, _f: &F, op: O)
     where
@@ -469,27 +475,99 @@ where
         O: OperatorClass<T> + 'static, 
         <O as OperatorClass<T>>::Instance: 'static
     {
-        self.parent.visit_operator(name, self.field, crate::operators::OperatorAny { opcls: op });
+        self.parent.visit_operator(name, self.field, op);
     }
 }
 
-// impl Record<Vec<T>> for VecRecord
-// where
-//     T: Queryable
-// {
-//     fn accept_visitor<V: RecordVisitor<Vec<T>>>(&self, visitor: &mut V)
-//     where
-//         Self: Sized
-//     {
-//     }
-// }
+pub struct VecRecord;
 
-// impl<T> Queryable for Vec<T>
-// where
-//     T: Queryable
-// {
-//     type Meta = VecRecord;
-//     fn get_meta() -> Self::Meta {
-//         VecRecord
-//     }
-// }
+impl<R> Record<Vec<R>> for VecRecord
+where
+    R: Queryable
+{
+    fn accept_visitor<V: RecordVisitor<Vec<R>>>(&self, visitor: &mut V)
+    where
+        Self: Sized
+    {
+        let mut n = VecRecordVisitor {
+            parent: visitor,
+        };
+        R::get_meta().accept_visitor(&mut n);
+    }
+}
+
+struct VecRecordVisitor<'a, P> {
+    parent: &'a mut P
+}
+
+impl<'a, P, R> RecordVisitor<R> for VecRecordVisitor<'a, P>
+where
+    P: RecordVisitor<Vec<R>>
+{
+    fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
+    where
+        F: Member<R, Value=T> + Clone + 'static,
+        O: OperatorClass<T> + 'static,
+        <O as OperatorClass<T>>::Instance: 'static
+    {
+        self.parent.visit_member(name, &VecField { inner_field: field.clone() }, defop);
+    }
+
+    fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
+    where
+        F: Field<R, Value=U> + Clone + 'static,
+        T: Record<U> + 'static,
+        U: 'static
+    {
+        self.parent.visit_record(name, &VecField { inner_field: field.clone() }, inner_record)
+    }
+}
+
+struct PrintingVisitor {
+    prefix: Option<String>
+}
+
+impl<R> RecordVisitor<R> for PrintingVisitor {
+    fn visit_member<F,O,T>(&mut self, name: &str, _field: &F, _defop: O)
+    where
+        F: Member<R, Value=T> + Clone + 'static,
+        O: OperatorClass<T> + 'static,
+        <O as OperatorClass<T>>::Instance: 'static
+    {
+        let name = if let Some(ref prefix) = self.prefix {
+            format!("{}__{}", prefix, name)
+        } else {
+            name.to_string()
+        };
+        println!("Visited {}", name);
+    }
+    fn visit_record<F, T, U>(&mut self, name: &str, _field: &F, inner_record: &T)
+    where
+        F: Field<R, Value=U> + Clone + 'static,
+        T: Record<U> + 'static,
+        U: 'static
+    {
+        let new_prefix = if let Some(ref prefix) = self.prefix {
+            format!("{}__{}", prefix, name)
+        } else {
+            name.to_string()
+        };
+        let mut pv = PrintingVisitor { prefix: Some(new_prefix) };
+        inner_record.accept_visitor(&mut pv);
+    }
+}
+
+pub fn print_queryable<Q: Queryable>() {
+    let mut pv = PrintingVisitor { prefix: None };
+    Q::get_meta().accept_visitor(&mut pv)
+}
+
+impl<T> Queryable for Vec<T>
+where
+    T: Queryable
+{
+    type Meta = VecRecord;
+    fn get_meta() -> Self::Meta {
+        VecRecord
+    }
+}
