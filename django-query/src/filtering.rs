@@ -50,7 +50,7 @@ pub trait RecordVisitor<R> {
 
     fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
     where
-        F: Member<R, Value=U> + Clone + 'static,
+        F: Field<R, Value=U> + Clone + 'static,
         T: Record<U> + 'static,
         U: 'static;
 }
@@ -285,11 +285,15 @@ impl<R: Queryable> QueryableRecord<R> {
         lhs: &str,
         rhs: &str,
     ) -> Result<Box<dyn Filter<R>>, FilterError> {
-        let query_parts = lhs.splitn(2, "__").collect::<Vec<_>>();
-        if query_parts.len() < 2 {
+        if self.fields.contains_key(lhs) {
             self.create_filter(lhs, None, rhs)
         } else {
-            self.create_filter(query_parts[0], Some(query_parts[1]), rhs)
+            let query_parts = lhs.rsplitn(2, "__").collect::<Vec<_>>();
+            if query_parts.len() == 2 {
+                self.create_filter(query_parts[1], Some(query_parts[0]), rhs)
+            } else {
+                Err(FilterError::NoField(lhs.to_string()))
+            }
         }
     }
 
@@ -358,7 +362,7 @@ where
 
     fn visit_record<F,T,U>(&mut self, name: &str, field: &F, inner_record: &T)
     where
-        F: Member<S, Value=U> + Clone + 'static,
+        F: Field<S, Value=U> + Clone + 'static,
         T: Record<U> + 'static,
         U: 'static
     {

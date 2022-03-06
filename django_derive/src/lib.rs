@@ -241,7 +241,7 @@ pub fn go(input: TokenStream) -> TokenStream {
                         visitor.visit_operator(#key, self, #value);
                     })
                 }
-                
+
                 structs.extend(quote::quote! {
                     #[derive(Clone)]
                     struct #structname;
@@ -253,7 +253,12 @@ pub fn go(input: TokenStream) -> TokenStream {
                         }
                     }
                 });
-                if !traversed {
+
+                if traversed {
+                    body.extend(quote::quote! {
+                        visitor.visit_record(#fieldname, &#structname, &#fieldtype::get_meta());
+                    });
+                } else {
                     structs.extend(quote::quote! {
                         #[automatically_derived]
                         impl #generics ::django_query::Member<#ident #generics> for #structname #wc {
@@ -262,17 +267,17 @@ pub fn go(input: TokenStream) -> TokenStream {
                             }
                         }
                     });
-                }
 
-                let defop = if let Some(op) = defop {
-                    op
-                } else {
-                    syn::parse_quote! {::django_query::operators::Eq}
-                };
-                
-                body.extend(quote::quote! {
-                    visitor.visit_member(#fieldname, &#structname, #defop);
-                });
+                    let defop = if let Some(op) = defop {
+                        op
+                    } else {
+                        syn::parse_quote! {::django_query::operators::Eq}
+                    };
+
+                    body.extend(quote::quote! {
+                        visitor.visit_member(#fieldname, &#structname, #defop);
+                    });
+                }
             }
 
             structs.extend(quote::quote! {

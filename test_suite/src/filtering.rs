@@ -372,4 +372,42 @@ mod tests {
         assert!(!filter.filter_one(&r2));
         assert!(filter.filter_one(&r3));
     }
+
+
+    #[derive(Queryable)]
+    struct MyNestedRecord
+    {
+        string_field: String,
+        int_field: i32
+    }
+    
+    #[derive(Queryable)]
+    struct MyRecord5
+    {
+        string_field: String,
+        int_field: i32,
+        #[django(traverse)]
+        foo: MyNestedRecord,
+    }
+
+    #[test]
+    fn basic_nesting() {
+        let r = MyRecord5 {
+            string_field: "test3".to_string(),
+            int_field: 4,
+            foo: MyNestedRecord {
+                string_field: "test4".to_string(),
+                int_field: 11
+            }
+        };
+        let qr = QueryableRecord::<MyRecord5>::new();
+        let filter = qr.create_filter_from_query("foo__int_field=11").unwrap();
+        assert!(filter.filter_one(&r));
+        let filter = qr.create_filter_from_query("foo__int_field=4").unwrap();
+        assert!(!filter.filter_one(&r));
+        let filter = qr.create_filter_from_query("int_field=4").unwrap();
+        assert!(filter.filter_one(&r));
+        let filter = qr.create_filter_from_query("int_field=5").unwrap();
+        assert!(!filter.filter_one(&r));
+    }
 }
