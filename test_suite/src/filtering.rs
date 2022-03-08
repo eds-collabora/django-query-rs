@@ -132,7 +132,7 @@ mod tests {
     struct MyRecord2<T>
     where
         T: Operable + 'static,
-        <T as Operable>::Base: Equatable + FromStr,
+        <T as Operable>::Base: core::cmp::Eq + FromStr,
         <<T as Operable>::Base as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(rename = "MYSTRING")]
@@ -208,7 +208,7 @@ mod tests {
     struct MyRecord3<T>
     where
         T: Operable + 'static,
-        <T as Operable>::Base: Equatable + FromStr,
+        <T as Operable>::Base: core::cmp::Eq + FromStr,
        <<T as Operable>::Base as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(rename = "MYSTRING")]
@@ -271,7 +271,7 @@ mod tests {
     struct MyRecord4<T>
     where
         T: Operable + 'static,
-        <T as Operable>::Base: Equatable + FromStr,
+        <T as Operable>::Base: core::cmp::Eq + FromStr,
         <<T as Operable>::Base as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(

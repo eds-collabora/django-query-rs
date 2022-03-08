@@ -7,19 +7,6 @@ pub struct EqImpl<T> {
     target: T,
 }
 
-pub trait Equatable: core::cmp::Eq {}
-
-impl Equatable for String {}
-impl Equatable for i8 {}
-impl Equatable for i16 {}
-impl Equatable for i32 {}
-impl Equatable for i64 {}
-impl Equatable for u8 {}
-impl Equatable for u16 {}
-impl Equatable for u32 {}
-impl Equatable for u64 {}
-
-
 impl Operable for i32 {
     type Base = Self;
     fn apply<O: Operator<i32>>(&self, op: &O) -> bool {
@@ -37,53 +24,17 @@ impl Operable for String {
 
 impl<T> Operator<T> for EqImpl<T>
 where
-    T: Equatable,
+    T: core::cmp::Eq,
 {
     fn apply(&self, value: &T) -> bool {
         value == &self.target
     }
 }
-
-impl<T> Operator<Option<T>> for EqImpl<T>
-where
-    T: Equatable,
-{
-    fn apply(&self, value: &Option<T>) -> bool {
-        if let Some(value) = value {
-            value == &self.target
-        } else {
-            false
-        }
-    }
-}
-
-impl<T> Operator<Vec<T>> for EqImpl<T>
-where
-    T: Equatable
-{
-    fn apply(&self, value: &Vec<T>) -> bool {
-        value.iter().any(|x| x == &self.target)
-    }
-}
-
 pub struct Eq;
 
 impl<T> OperatorClass<T> for Eq
 where
-    T: Equatable + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
-{
-    type Instance = EqImpl<T>;
-    fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
-        Ok(EqImpl {
-            target: T::from_str(rhs).map_err(|e| FilterError::Instantiation(e.into()))?,
-        })
-    }
-}
-
-impl<T> OperatorClass<Option<T>> for Eq
-where
-    T: Equatable + FromStr,
+    T: core::cmp::Eq + FromStr,
     <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
 {
     type Instance = EqImpl<T>;
@@ -100,23 +51,10 @@ pub struct InImpl<T> {
 
 impl<T> Operator<T> for InImpl<T>
 where
-    T: Equatable + FromStr
+    T: core::cmp::Eq + FromStr
 {
     fn apply(&self, value: &T) -> bool {
         self.targets.contains(value)
-    }
-}
-
-impl<T> Operator<Option<T>> for InImpl<T>
-where
-    T: Equatable + FromStr
-{
-    fn apply(&self, value: &Option<T>) -> bool {
-        if let Some(value) = value {
-            self.targets.contains(value)
-        } else {
-            false
-        }
     }
 }
 
@@ -124,22 +62,7 @@ pub struct In;
 
 impl<T> OperatorClass<T> for In
 where
-    T: Equatable + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
-{
-    type Instance = InImpl<T>;
-    fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
-        let mut targets = Vec::new();
-        for elt in rhs.split(',') {
-            targets.push(T::from_str(elt).map_err(|e| FilterError::Instantiation(e.into()))?);
-        }
-        Ok(InImpl { targets })
-    }
-}
-
-impl<T> OperatorClass<Option<T>> for In
-where
-    T: Equatable + FromStr,
+    T: core::cmp::Eq + FromStr,
     <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
 {
     type Instance = InImpl<T>;
@@ -375,42 +298,3 @@ where
         })
     }
 }
-
-/* --------------------------------------- */
-
-// pub struct OperatorAnyImpl<O> {
-//     op: O
-// }
-
-// impl<O> OperatorAnyImpl<O> {
-//     pub fn new(op: O) -> Self {
-//         Self {
-//             op
-//         }
-//     }
-// }
-
-// impl<T, O> Operator<Vec<T>> for OperatorAnyImpl<O>
-// where
-//     O: Operator<T>
-// {
-//     fn apply(&self, value: &Vec<T>) -> bool {
-//         value.iter().any(|x| self.op.apply(x))
-//     }
-// }
-
-// pub struct OperatorAny<O> {
-//     opcls: O
-// }
-
-// impl<T, O> OperatorClass<Vec<T>> for OperatorAny<O>
-// where
-//     O: OperatorClass<T>
-// {
-//     type Instance = OperatorAnyImpl<<O as OperatorClass<T>>::Instance>;
-//     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
-//         Ok(OperatorAnyImpl {
-//             op: self.opcls.instantiate(rhs)?
-//         })
-//     }
-// }
