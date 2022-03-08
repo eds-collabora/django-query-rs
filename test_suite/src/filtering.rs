@@ -131,8 +131,9 @@ mod tests {
     #[derive(Queryable)]
     struct MyRecord2<T>
     where
-        T: Equatable + FromStr + 'static,
-        <T as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
+        T: Operable + 'static,
+        <T as Operable>::Base: Equatable + FromStr,
+        <<T as Operable>::Base as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(rename = "MYSTRING")]
         string_field: String,
@@ -206,8 +207,9 @@ mod tests {
     #[derive(Queryable)]
     struct MyRecord3<T>
     where
-        T: Equatable + FromStr + 'static,
-        <T as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
+        T: Operable + 'static,
+        <T as Operable>::Base: Equatable + FromStr,
+       <<T as Operable>::Base as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(rename = "MYSTRING")]
         string_field: String,
@@ -268,8 +270,9 @@ mod tests {
     #[derive(Queryable)]
     struct MyRecord4<T>
     where
-        T: Equatable + FromStr + 'static,
-        <T as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
+        T: Operable + 'static,
+        <T as Operable>::Base: Equatable + FromStr,
+        <<T as Operable>::Base as FromStr>::Err: Debug + std::error::Error + Sync + Send + 'static,
     {
         #[django(
             rename = "MYSTRING",

@@ -262,6 +262,10 @@ pub fn go(input: TokenStream) -> TokenStream {
                     structs.extend(quote::quote! {
                         #[automatically_derived]
                         impl #generics ::django_query::Member<#ident #generics> for #structname #wc {
+                            type Value = #fieldtype;
+                            fn apply<O: Operator<<Self::Value as Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
+                                data.#fieldid.apply(op)
+                            }  
                             fn accept_visitor<V: MemberVisitor<Self, #ident #generics, <Self as Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
                                 #fieldbody
                             }

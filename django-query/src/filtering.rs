@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::str::FromStr;
+//use std::str::FromStr;
 
 use thiserror::Error;
 
@@ -16,13 +16,57 @@ pub enum FilterError {
     Instantiation(#[from] anyhow::Error),
 }
 
+// What about the combination?
+// - An extract value layer that can be produced by procmacros
+// - An apply layer that can be provided by type inference
+
+// pub trait Scalar {}
+
+// impl Operable for S
+// where
+//     S: Scalar
+// {
+//     type Base = Self;
+//     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
+//         op.apply(self)
+//     }
+// }
+
+pub trait Operable {
+    type Base: Operable;
+    fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool;
+}
+
+// impl<T, I> Operable for I
+// where
+//     for<'i> &'i I: IntoIterator<Item=&'i T>,
+//     T: Operable
+// {
+//     type Base = <T as Operable>::Base;
+//     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
+//         self.into_iter().any(|x| x.apply(op))
+//     }
+// }
+
+impl<T> Operable for Vec<T>
+where
+    T: Operable
+{
+    type Base = <T as Operable>::Base;
+    fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
+        self.into_iter().any(|x| x.apply(op))
+    }
+}
+
 pub trait Field<R>: Clone {
     type Value;
     fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
 }
 
-pub trait Member<R>: Field<R> {
-    fn accept_visitor<V: MemberVisitor<Self, R, <Self as Field<R>>::Value>>(&self, visitor: &mut V);
+pub trait Member<R>: Clone {
+    type Value: Operable;
+    fn apply<O: Operator<<Self::Value as Operable>::Base>>(&self, op: &O, data: &R) -> bool;
+    fn accept_visitor<V: MemberVisitor<Self, R, Self::Value>>(&self, visitor: &mut V);
 }
 
 pub trait MemberVisitor<F, R, T>
@@ -32,8 +76,9 @@ where
     fn visit_operator<O>(&mut self, name: &str, f: &F, op: O)
     where
         F: 'static,
-        O: OperatorClass<T> + 'static, 
-        <O as OperatorClass<T>>::Instance: 'static;
+        O: OperatorClass<<T as Operable>::Base> + 'static, 
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable;
 }
 
 pub trait Record<R> {
@@ -44,8 +89,9 @@ pub trait RecordVisitor<R> {
     fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
     where
         F: Member<R, Value=T> + Clone + 'static,
-        O: OperatorClass<T> + 'static,
-        <O as OperatorClass<T>>::Instance: 'static;
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable;
 
     fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
     where
@@ -53,6 +99,39 @@ pub trait RecordVisitor<R> {
         T: Record<U> + 'static,
         U: 'static;
 }
+
+struct NestingOperator<'a, O, S, F> {
+    op: &'a O,
+    inner: F,
+    _marker: core::marker::PhantomData<S>
+}
+
+impl<'a,T,O,F,S> Operator<S> for NestingOperator<'a,O,S,F>
+where
+    O: Operator<T>,
+    F: Field<S, Value=T>
+{
+    fn apply(&self, value: &S) -> bool {
+        self.inner.apply(self.op, value)
+    }
+}       
+
+struct NestingOperator2<'a, O, S, F> {
+    op: &'a O,
+    inner: F,
+    _marker: core::marker::PhantomData<S>
+}
+
+impl<'a,T,O,F,S> Operator<S> for NestingOperator2<'a,O,S,F>
+where
+    O: Operator<<T as Operable>::Base>,
+    F: Member<S, Value=T>,
+    T: Operable
+{
+    fn apply(&self, value: &S) -> bool {
+        self.inner.apply(self.op, value)
+    }
+}       
 
 pub struct NestedField<F,G> {
     outer_field: F,
@@ -72,27 +151,12 @@ where
     }
 }
 
-struct NestingOperator<'a, O, S, F> {
-    op: &'a O,
-    inner: F,
-    _marker: core::marker::PhantomData<S>
-}
-
-impl<'a, T,O,F,S> Operator<S> for NestingOperator<'a, O,S,F>
-where
-    O: Operator<T>,
-    F: Field<S, Value=T>
-{
-    fn apply(&self, value: &S) -> bool {
-        self.inner.apply(self.op, value)
-    }
-}       
-
 impl<F, G, R, S, T> Field<R> for NestedField<F, G>
 where
     F: Field<R, Value=S>,
     G: Field<S, Value=T>,
-    S: 'static
+    S: 'static,
+    T: Operable
 {
     type Value = T;
     fn apply<O: Operator<Self::Value>>(&'_ self, op: &O, data: &R) -> bool {
@@ -104,9 +168,15 @@ impl<F, G, R, S, T> Member<R> for NestedField<F, G>
 where
     F: Field<R, Value=S> + 'static,
     G: Member<S, Value=T>,
-    S: 'static
+    S: 'static,
+    T: Operable
 {
-    fn accept_visitor<V: MemberVisitor<Self, R, <Self as Field<R>>::Value>>(&self, visitor: &mut V) {
+    type Value = T;
+    fn apply<O: Operator<<Self::Value as Operable>::Base>>(&self, op: &O, data: &R) -> bool {
+        self.outer_field.apply(&NestingOperator2 { op, inner: self.inner_field.clone(), _marker: Default::default() }, data)
+    }
+    
+    fn accept_visitor<V: MemberVisitor<Self, R, <Self as Member<R>>::Value>>(&self, visitor: &mut V) {
         let mut n = NestedMemberVisitor {
             parent: visitor,
             field: self,
@@ -122,7 +192,8 @@ where
 {
     fn nest<G,T>(&self, nested_field: G) -> NestedField<F, G>
     where
-        G: Field<R, Value=T> + 'static,
+        G: Member<R, Value=T> + 'static,
+        T: Operable,
         R: 'static;
 }
 
@@ -137,8 +208,9 @@ where
 {
     fn nest<G,T>(&self, inner_field: G) -> NestedField<F, G>
     where
-        G: Field<R, Value=T> + 'static,
-        R: 'static
+        G: Member<R, Value=T> + 'static,
+        T: Operable,
+        R: 'static,
     {
         NestedField {
             outer_field: self.outer_field.clone(),
@@ -180,8 +252,9 @@ impl<F, O> FilterImpl<F, O> {
 
 impl<F, O, T, R> Filter<R> for FilterImpl<F, O>
 where
-    F: Field<R, Value = T>,
-    O: Operator<T>,
+    F: Member<R, Value = T>,
+    O: Operator<<T as Operable>::Base>,
+    T: Operable
 {
     fn filter_one(&self, data: &R) -> bool {
         self.field.apply(&self.operator, data)
@@ -201,9 +274,10 @@ impl<F, O> FilterClassImpl<F, O> {
 
 impl<F, O, R, T> FilterClass<R> for FilterClassImpl<F, O>
 where
-    F: Field<R, Value = T> + Clone + 'static,
-    O: OperatorClass<T>,
-    <O as OperatorClass<T>>::Instance: 'static
+    F: Member<R, Value = T> + Clone + 'static,
+    O: OperatorClass<<T as Operable>::Base>,
+    <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+    T: Operable
 {
     fn instantiate(&self, rhs: &str) -> Result<Box<dyn Filter<R>>, FilterError> {
         Ok(Box::new(FilterImpl::new(
@@ -227,8 +301,9 @@ impl<R> QueryableMember<R> {
     pub fn new<F, O, T>(f: &F, defop: O) -> Self
     where
         F: Member<R, Value=T> + 'static,
-        O: OperatorClass<T> + 'static,
-        <O as OperatorClass<T>>::Instance: 'static
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable
     {
         let mut res = Self {
             default: Box::new(FilterClassImpl::new(f.clone(), defop)),
@@ -257,12 +332,13 @@ impl<R> QueryableMember<R> {
 impl<F, R, T> MemberVisitor<F, R, T> for QueryableMember<R>
 where
     F: Member<R, Value=T> + Clone,
+    T: Operable
 {
     fn visit_operator<O>(&mut self, name: &str, f: &F, op: O)
     where
         F: 'static,
-        O: OperatorClass<T> + 'static,
-        <O as OperatorClass<T>>::Instance: 'static
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static
     {
         self.operators
             .insert(name.to_string(), Box::new(FilterClassImpl::new(f.clone(), op)));
@@ -326,8 +402,9 @@ impl<R> RecordVisitor<R> for QueryableRecord<R> {
     fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
     where
         F: Member<R, Value=T> + Clone + 'static,
-        O: OperatorClass<T> + 'static,
-        <O as OperatorClass<T>>::Instance: 'static,
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable
     {
         self.fields.insert(name.to_string(), QueryableMember::new(field, defop));
     }
@@ -368,8 +445,9 @@ where
     fn visit_member<F, O, T>(&mut self, name: &str, field: &F, defop: O)
     where
         F: Member<S, Value=T> + Clone + 'static,
-        O: OperatorClass<T> + 'static,
-        <O as OperatorClass<T>>::Instance: 'static
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable
     {
         self.parent.visit_member(format!("{}__{}", self.prefix, name).as_str(), 
                                  &self.nester.nest(field.clone()), defop);
@@ -406,13 +484,14 @@ where
     P: MemberVisitor<NestedField<F,G>, R, T>,
     F: Field<R, Value=S> + 'static,
     G: Member<S, Value=T>,
-    S: 'static
+    S: 'static,
+    T: Operable
 {
     fn visit_operator<O>(&mut self, name: &str, _f: &G, op: O)
     where
         G: 'static,
-        O: OperatorClass<T> + 'static, 
-        <O as OperatorClass<T>>::Instance: 'static
+        O: OperatorClass<<T as Operable>::Base> + 'static, 
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static
     {
         self.parent.visit_operator(name, self.field, op);
     }
@@ -449,9 +528,14 @@ impl<F, R, T, I> Member<I> for IterableField<F>
 where
     F: Member<R, Value=T> + 'static,
     R: 'static,
-    for <'i> &'i I: IntoIterator<Item=&'i R>
+    for <'i> &'i I: IntoIterator<Item=&'i R>,
+    T: Operable
 {
-    fn accept_visitor<V: MemberVisitor<Self, I, <Self as Field<I>>::Value>>(&self, visitor: &mut V) {
+    type Value = T;
+    fn apply<O: Operator<<T as Operable>::Base>>(&'_ self, op: &O, data: &I) -> bool {
+        data.into_iter().any(|x| self.inner_field.apply(op, &x))
+    }
+    fn accept_visitor<V: MemberVisitor<Self, I, <Self as Member<I>>::Value>>(&self, visitor: &mut V) {
         let mut n = IterableMemberVisitor {
             parent: visitor,
             field: self,
@@ -472,13 +556,15 @@ where
     P: MemberVisitor<IterableField<F>, I, T>,
     F: Member<R, Value=T> + 'static,
     R: 'static,
-    for<'i> &'i I: IntoIterator<Item=&'i R>
+    for<'i> &'i I: IntoIterator<Item=&'i R>,
+    T: Operable
+    
 {
     fn visit_operator<O>(&mut self, name: &str, _f: &F, op: O)
     where
         F: 'static,
-        O: OperatorClass<T> + 'static, 
-        <O as OperatorClass<T>>::Instance: 'static
+        O: OperatorClass<<T as Operable>::Base> + 'static, 
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static
     {
         self.parent.visit_operator(name, self.field, op);
     }
@@ -517,8 +603,9 @@ where
     fn visit_member<F,O,T>(&mut self, name: &str, field: &F, defop: O)
     where
         F: Member<R, Value=T> + Clone + 'static,
-        O: OperatorClass<T> + 'static,
-        <O as OperatorClass<T>>::Instance: 'static
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable
     {
         self.parent.visit_member(name, &IterableField { inner_field: field.clone() }, defop);
     }
@@ -541,8 +628,9 @@ impl<R> RecordVisitor<R> for PrintingVisitor {
     fn visit_member<F,O,T>(&mut self, name: &str, _field: &F, _defop: O)
     where
         F: Member<R, Value=T> + Clone + 'static,
-        O: OperatorClass<T> + 'static,
-        <O as OperatorClass<T>>::Instance: 'static
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable
     {
         let name = if let Some(ref prefix) = self.prefix {
             format!("{}__{}", prefix, name)

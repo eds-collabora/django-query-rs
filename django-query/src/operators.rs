@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use crate::filtering::{FilterError, Operator, OperatorClass};
+use crate::filtering::{FilterError, Operator, OperatorClass, Operable};
 
 pub struct EqImpl<T> {
     target: T,
@@ -18,6 +18,22 @@ impl Equatable for u8 {}
 impl Equatable for u16 {}
 impl Equatable for u32 {}
 impl Equatable for u64 {}
+
+
+impl Operable for i32 {
+    type Base = Self;
+    fn apply<O: Operator<i32>>(&self, op: &O) -> bool {
+        op.apply(self)
+    }
+}
+
+
+impl Operable for String {
+    type Base = Self;
+    fn apply<O: Operator<String>>(&self, op: &O) -> bool {
+        op.apply(self)
+    }
+}
 
 impl<T> Operator<T> for EqImpl<T>
 where
