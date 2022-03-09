@@ -146,7 +146,7 @@ impl syn::parse::Parse for DjangoMeta {
 }
 
 #[proc_macro_derive(Queryable, attributes(django))]
-pub fn go(input: TokenStream) -> TokenStream {
+pub fn queryable(input: TokenStream) -> TokenStream {
     let syn::DeriveInput {
         ident,
         data,
@@ -310,6 +310,46 @@ pub fn go(input: TokenStream) -> TokenStream {
                 type Meta = MyRecord;
                 fn get_meta() -> Self::Meta {
                     MyRecord
+                }
+            }
+        };
+    }
+    .into();
+
+    res
+}
+
+#[proc_macro_derive(Operable)]
+pub fn operable(input: TokenStream) -> TokenStream {
+    let syn::DeriveInput {
+        ident,
+        data,
+        generics,
+        ..
+    } = syn::parse_macro_input!(input);
+
+    let wc = generics.where_clause.as_ref();
+    
+    if let syn::Data::Enum(e) = data {
+        for variant in e.variants.iter() {
+            match variant.fields {
+                syn::Fields::Unit => {},
+                _ => {
+                    panic!("Operable can only be automatically derived for plain enums");
+                }
+            }
+        }
+    } else {
+        panic!("Operable can only be automatically derived for plain enums");
+    }
+
+    let res: TokenStream = quote::quote! {
+        const _: () = {
+            #[automatically_derived]
+            impl #generics ::django_query::Operable for #ident #generics #wc {
+                type Base = Self;
+                fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
+                    op.apply(self)
                 }
             }
         };
