@@ -101,6 +101,12 @@ pub trait SortVisitor<R> {
     where
         F: Field<R, Value=T> + 'static,
         T: Ord;
+    fn visit_key_sort<F, G, T, U>(&mut self, name: &str, field: &F, primary_key: &G)
+    where
+        F: Field<R, Value=T> + 'static,
+        G: Field<T, Value=U> + 'static,
+        U: Ord,
+        T: 'static;
 }
 
 pub trait Sortable {
@@ -142,5 +148,55 @@ impl<R: Sortable> SortVisitor<R> for SortableRecord<R> {
         T: Ord
     {
         self.sorts.insert(name.to_string(), Box::new( SorterClassImpl::new(field.clone()) ));
+    }
+
+    fn visit_key_sort<F, G, T, U>(&mut self, name: &str, field: &F, primary_key: &G)
+    where
+        F: Field<R, Value=T> + 'static,
+        G: Field<T, Value=U> + 'static,
+        U: Ord,
+        T: 'static
+    {
+        self.sorts.insert(
+            name.to_string(),
+            Box::new(
+                SorterClassImpl::new(
+                    NestedField {
+                        outer: field.clone(),
+                        inner: primary_key.clone()
+                    }
+                )
+            )
+        );
+    }
+}
+
+pub struct NestedField<F,G> {
+    outer: F,
+    inner: G
+}
+
+impl<F,G> Clone for NestedField<F,G>
+where
+    F: Clone,
+    G: Clone
+{
+    fn clone(&self) -> Self {
+        NestedField {
+            inner: self.inner.clone(),
+            outer: self.outer.clone()
+        }
+    }
+}
+
+impl<F,G,R,T,U> Field<R> for NestedField<F,G>
+where
+    F: Field<R,Value=T>,
+    G: Field<T,Value=U>,
+    T: 'static
+{
+    type Value = U;
+    fn value<'a>(&self, data: &'a R) -> &'a U {
+        self.inner.value(self.outer.value(data))
     }
 }
