@@ -255,9 +255,11 @@ pub fn go(input: TokenStream) -> TokenStream {
                 });
 
                 if traversed {
-                    println!("Traversity? FT: {:?}", fieldtype);
                     body.extend(quote::quote! {
-                        visitor.visit_record(#fieldname, &#structname, #fieldtype::get_meta());
+                        {
+                            type DjangoNested = #fieldtype;
+                            visitor.visit_record(#fieldname, &#structname, &DjangoNested::get_meta());
+                        }
                     });
                 } else {
                     structs.extend(quote::quote! {
