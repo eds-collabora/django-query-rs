@@ -288,7 +288,7 @@ pub fn go(input: TokenStream) -> TokenStream {
             }
 
             structs.extend(quote::quote! {
-                struct MyRecord;
+                pub struct MyRecord;
                 impl #generics ::django_query::Record<#ident #generics> for MyRecord #wc {
                     fn accept_visitor<V: ::django_query::RecordVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
                         #body
