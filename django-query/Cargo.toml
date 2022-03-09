@@ -9,3 +9,4 @@ license = "MIT OR Apache-2.0"
 anyhow = "1"
 thiserror = "1.0"
 django_derive= { path="../django_derive" }
+chrono = "0.4"

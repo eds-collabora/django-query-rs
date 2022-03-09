@@ -7,33 +7,30 @@ pub struct EqImpl<T> {
     target: T,
 }
 
-impl Operable for i32 {
-    type Base = Self;
-    fn apply<O: Operator<i32>>(&self, op: &O) -> bool {
-        op.apply(self)
-    }
-}
+pub trait Scalar {}
 
-impl Operable for u32 {
-    type Base = Self;
-    fn apply<O: Operator<u32>>(&self, op: &O) -> bool {
-        op.apply(self)
-    }
-}
+impl Scalar for i8 {}
+impl Scalar for u8 {}
+impl Scalar for i16 {}
+impl Scalar for u16 {}
+impl Scalar for i32 {}
+impl Scalar for u32 {}
+impl Scalar for i64 {}
+impl Scalar for u64 {}
+impl Scalar for bool {}
+impl Scalar for String {}
 
-impl Operable for u64 {
-    type Base = Self;
-    fn apply<O: Operator<u32>>(&self, op: &O) -> bool {
-        op.apply(self)
-    }
-}
+impl<T: chrono::TimeZone> Scalar for chrono::DateTime<T> { }
 
-impl Operable for String {
+impl<T> Operable for T
+where
+    T: Scalar
+{
     type Base = Self;
-    fn apply<O: Operator<String>>(&self, op: &O) -> bool {
+    fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
         op.apply(self)
     }
-}
+}    
 
 impl<T> Operator<T> for EqImpl<T>
 where
