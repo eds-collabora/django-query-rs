@@ -16,39 +16,22 @@ pub enum FilterError {
     Instantiation(#[from] anyhow::Error),
 }
 
-// What about the combination?
-// - An extract value layer that can be produced by procmacros
-// - An apply layer that can be provided by type inference
-
-// pub trait Scalar {}
-
-// impl Operable for S
-// where
-//     S: Scalar
-// {
-//     type Base = Self;
-//     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
-//         op.apply(self)
-//     }
-// }
-
 pub trait Operable {
     type Base: Operable;
     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool;
 }
 
-// impl<T, I> Operable for I
-// where
-//     for<'i> &'i I: IntoIterator<Item=&'i T>,
-//     T: Operable
-// {
-//     type Base = <T as Operable>::Base;
-//     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
-//         self.into_iter().any(|x| x.apply(op))
-//     }
-// }
-
 impl<T> Operable for Vec<T>
+where
+    T: Operable
+{
+    type Base = <T as Operable>::Base;
+    fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
+        self.into_iter().any(|x| x.apply(op))
+    }
+}
+
+impl<T> Operable for Option<T>
 where
     T: Operable
 {
@@ -100,13 +83,13 @@ pub trait RecordVisitor<R> {
         U: 'static;
 }
 
-struct NestingOperator<'a, O, S, F> {
+struct FieldNestingOperator<'a, O, S, F> {
     op: &'a O,
     inner: F,
     _marker: core::marker::PhantomData<S>
 }
 
-impl<'a,T,O,F,S> Operator<S> for NestingOperator<'a,O,S,F>
+impl<'a,T,O,F,S> Operator<S> for FieldNestingOperator<'a,O,S,F>
 where
     O: Operator<T>,
     F: Field<S, Value=T>
@@ -116,13 +99,13 @@ where
     }
 }       
 
-struct NestingOperator2<'a, O, S, F> {
+struct MemberNestingOperator<'a, O, S, F> {
     op: &'a O,
     inner: F,
     _marker: core::marker::PhantomData<S>
 }
 
-impl<'a,T,O,F,S> Operator<S> for NestingOperator2<'a,O,S,F>
+impl<'a,T,O,F,S> Operator<S> for MemberNestingOperator<'a,O,S,F>
 where
     O: Operator<<T as Operable>::Base>,
     F: Member<S, Value=T>,
@@ -160,7 +143,7 @@ where
 {
     type Value = T;
     fn apply<O: Operator<Self::Value>>(&'_ self, op: &O, data: &R) -> bool {
-        self.outer_field.apply(&NestingOperator { op, inner: self.inner_field.clone(), _marker: Default::default() }, data)
+        self.outer_field.apply(&FieldNestingOperator { op, inner: self.inner_field.clone(), _marker: Default::default() }, data)
     }
 }
 
@@ -173,7 +156,7 @@ where
 {
     type Value = T;
     fn apply<O: Operator<<Self::Value as Operable>::Base>>(&self, op: &O, data: &R) -> bool {
-        self.outer_field.apply(&NestingOperator2 { op, inner: self.inner_field.clone(), _marker: Default::default() }, data)
+        self.outer_field.apply(&MemberNestingOperator { op, inner: self.inner_field.clone(), _marker: Default::default() }, data)
     }
     
     fn accept_visitor<V: MemberVisitor<Self, R, <Self as Member<R>>::Value>>(&self, visitor: &mut V) {

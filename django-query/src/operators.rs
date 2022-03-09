@@ -14,6 +14,12 @@ impl Operable for i32 {
     }
 }
 
+impl Operable for u32 {
+    type Base = Self;
+    fn apply<O: Operator<u32>>(&self, op: &O) -> bool {
+        op.apply(self)
+    }
+}
 
 impl Operable for String {
     type Base = Self;

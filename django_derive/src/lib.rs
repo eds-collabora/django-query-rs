@@ -248,25 +248,26 @@ pub fn go(input: TokenStream) -> TokenStream {
                     #[automatically_derived]
                     impl #generics ::django_query::Field<#ident #generics> for #structname #wc {
                         type Value = #fieldtype;
-                        fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &#ident #generics) -> bool {
+                        fn apply<O: ::django_query::Operator<Self::Value>>(&self, op: &O, data: &#ident #generics) -> bool {
                             op.apply(&data.#fieldid)
                         }
                     }
                 });
 
                 if traversed {
+                    println!("Traversity? FT: {:?}", fieldtype);
                     body.extend(quote::quote! {
-                        visitor.visit_record(#fieldname, &#structname, &#fieldtype::get_meta());
+                        visitor.visit_record(#fieldname, &#structname, #fieldtype::get_meta());
                     });
                 } else {
                     structs.extend(quote::quote! {
                         #[automatically_derived]
                         impl #generics ::django_query::Member<#ident #generics> for #structname #wc {
                             type Value = #fieldtype;
-                            fn apply<O: Operator<<Self::Value as Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
+                            fn apply<O: ::django_query::Operator<<Self::Value as ::django_query::Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
                                 data.#fieldid.apply(op)
                             }  
-                            fn accept_visitor<V: MemberVisitor<Self, #ident #generics, <Self as Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
+                            fn accept_visitor<V: ::django_query::MemberVisitor<Self, #ident #generics, <Self as ::django_query::Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
                                 #fieldbody
                             }
                         }
@@ -286,8 +287,8 @@ pub fn go(input: TokenStream) -> TokenStream {
 
             structs.extend(quote::quote! {
                 struct MyRecord;
-                impl #generics Record<#ident #generics> for MyRecord #wc {
-                    fn accept_visitor<V: RecordVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
+                impl #generics ::django_query::Record<#ident #generics> for MyRecord #wc {
+                    fn accept_visitor<V: ::django_query::RecordVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
                         #body
                     }
                 }
@@ -303,7 +304,7 @@ pub fn go(input: TokenStream) -> TokenStream {
         const _: () = {
             #structs
             #[automatically_derived]
-            impl #generics Queryable for #ident #generics #wc {
+            impl #generics ::django_query::Queryable for #ident #generics #wc {
                 type Meta = MyRecord;
                 fn get_meta() -> Self::Meta {
                     MyRecord
