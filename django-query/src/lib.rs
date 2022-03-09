@@ -1,5 +1,6 @@
 pub mod filtering;
 pub mod operators;
+pub mod ordering;
 
 pub use crate::filtering::*;
 

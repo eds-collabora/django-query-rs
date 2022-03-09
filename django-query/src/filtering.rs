@@ -450,7 +450,6 @@ where
                 outer_field: field.clone()
             },
             _marker: Default::default(),
-
         };
         inner_record.accept_visitor(&mut n);
     }
