@@ -101,12 +101,11 @@ pub trait SortVisitor<R> {
     where
         F: Field<R, Value=T> + 'static,
         T: Ord;
-    fn visit_key_sort<F, G, T, U>(&mut self, name: &str, field: &F, primary_key: &G)
+
+    fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, sort_key: &str)
     where
         F: Field<R, Value=T> + 'static,
-        G: Field<T, Value=U> + 'static,
-        U: Ord,
-        T: 'static;
+        T: Sortable + 'static;
 }
 
 pub trait Sortable {
@@ -117,7 +116,7 @@ pub struct SortableRecord<R> {
     sorts: BTreeMap<String, Box<dyn SorterClass<R>>>
 }
 
-impl<R: Sortable> SortableRecord<R> {
+impl<R: Sortable + 'static> SortableRecord<R> {
     pub fn new() -> Self {
         let mut res = Self {
             sorts: BTreeMap::new()
@@ -125,21 +124,32 @@ impl<R: Sortable> SortableRecord<R> {
         R::accept_visitor(&mut res);
         res
     }
-    
+
     pub fn create_sort(&self, expr: &str) -> Result<Box<dyn Sorter<R>>, SorterError> {
-        if expr.starts_with('-') {
-            Ok(self.sorts
-                .get(&expr[1..])
-                .ok_or_else(|| SorterError::NoSort(expr.to_string()))?
-                .instantiate(true))
-        } else {
-            Ok(self.sorts
-                .get(expr)
-                .ok_or_else(|| SorterError::NoSort(expr.to_string()))?
-                .instantiate(false))
+        let parts = expr.split(',').collect::<Vec<&str>>();
+        println!("Got parts: {:?}", parts);
+        let mut full_sort: Option<Box<dyn Sorter<R>>> = None;
+        for part in parts.iter().rev() {
+            let part_sort = if part.starts_with('-') {
+                self.sorts
+                    .get(&part[1..])
+                    .ok_or_else(|| SorterError::NoSort(part.to_string()))?
+                    .instantiate(true)
+            } else {
+                self.sorts
+                    .get(*part)
+                    .ok_or_else(|| SorterError::NoSort(part.to_string()))?
+                    .instantiate(false)
+            };
+            full_sort = if let Some(sort) = full_sort {
+                Some(Box::new(StackedSorter::new(part_sort, sort)))
+            } else {
+                Some(part_sort)
+            };
         }
+        Ok(full_sort.ok_or_else(|| SorterError::NoSort(expr.to_string()))?)
     }
-}    
+}
 
 impl<R: Sortable> SortVisitor<R> for SortableRecord<R> {
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
@@ -150,26 +160,63 @@ impl<R: Sortable> SortVisitor<R> for SortableRecord<R> {
         self.sorts.insert(name.to_string(), Box::new( SorterClassImpl::new(field.clone()) ));
     }
 
-    fn visit_key_sort<F, G, T, U>(&mut self, name: &str, field: &F, primary_key: &G)
+    fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, key: &str)
     where
         F: Field<R, Value=T> + 'static,
-        G: Field<T, Value=U> + 'static,
-        U: Ord,
-        T: 'static
+        T: Sortable + 'static
     {
-        self.sorts.insert(
-            name.to_string(),
-            Box::new(
-                SorterClassImpl::new(
-                    NestedField {
-                        outer: field.clone(),
-                        inner: primary_key.clone()
-                    }
-                )
-            )
-        );
+        let mut v = KeyVisitor {
+            name: name,
+            key: key,
+            field: field.clone(),
+            parent: self,
+            _marker: Default::default(),
+        };
+        T::accept_visitor(&mut v);
     }
 }
+
+struct KeyVisitor<'a, 'b, P, F, S> {
+    name: &'a str,
+    key: &'a str,
+    field: F,
+    parent: &'b mut P,
+    _marker: core::marker::PhantomData<S>,
+}
+
+impl<'a, 'b, P, G, R, S> SortVisitor<R> for KeyVisitor<'a, 'b, P, G, S>
+where
+    P: SortVisitor<S>,
+    G: Field<S, Value=R> + 'static,
+    R: 'static
+{
+    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    where
+        F: Field<R, Value=T> + 'static,
+        T: Ord
+    {
+        if name == self.key {
+            self.parent.visit_sort(self.name, &NestedField { outer: self.field.clone(), inner: field.clone() });
+        }
+    }
+
+    fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, key: &str)
+    where
+        F: Field<R, Value=T> + 'static,
+        T: Sortable + 'static
+    {
+        if name == self.key {
+            let mut v = KeyVisitor {
+                name: self.name,
+                key: key,
+                field: NestedField { outer: self.field.clone(), inner: field.clone() },
+                parent: self.parent,
+                _marker: Default::default(),
+            };
+            T::accept_visitor(&mut v);
+        }
+    }
+}   
 
 pub struct NestedField<F,G> {
     outer: F,
@@ -198,5 +245,27 @@ where
     type Value = U;
     fn value<'a>(&self, data: &'a R) -> &'a U {
         self.inner.value(self.outer.value(data))
+    }
+}
+
+pub struct StackedSorter<R> {
+    primary: Box<dyn Sorter<R>>,
+    secondary: Box<dyn Sorter<R>>
+}
+
+impl<R> StackedSorter<R> {
+    pub fn new(primary: Box<dyn Sorter<R>>, secondary: Box<dyn Sorter<R>>) -> Self {
+        Self { primary, secondary }
+    }
+}
+
+impl<R> Sorter<R> for StackedSorter<R>
+{
+    fn compare(&self, a: &R, b: &R) -> Ordering {
+        match self.primary.compare(a, b) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Equal => self.secondary.compare(a, b)
+        }
     }
 }

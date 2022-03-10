@@ -32,6 +32,7 @@ enum DjangoItem {
     DefaultOperator2(syn::Path),
     Traversed,
     Ignored,
+    Sort(Option<syn::Ident>),
 }
 
 impl syn::parse::Parse for DjangoItem {
@@ -55,7 +56,6 @@ impl syn::parse::Parse for DjangoItem {
                 Ok(DjangoItem::DefaultOperator2(fun))
             },
             "exclude" => {
-                eprintln!("Got exclude");
                 Ok(DjangoItem::Ignored)
             },
             "traverse" => {
@@ -68,6 +68,16 @@ impl syn::parse::Parse for DjangoItem {
                 let punc = syn::punctuated::Punctuated::<DjangoOperator, syn::Token![,]>::parse_terminated(&content)?;
                 Ok(DjangoItem::Operators(punc.into_iter().collect()))
             }
+            "sort" => {
+                if input.lookahead1().peek(syn::token::Paren) { 
+                    let content;
+                    let _: syn::token::Paren = syn::parenthesized!(content in input);
+                    let item: syn::Ident = content.parse()?;
+                    Ok(DjangoItem::Sort(Some(item)))
+                } else {
+                    Ok(DjangoItem::Sort(None))
+                }
+            },
             _ => Err(syn::Error::new_spanned(
                 attr,
                 "unsupported django attribute",
@@ -77,14 +87,20 @@ impl syn::parse::Parse for DjangoItem {
 }
 
 #[derive(Debug)]
-enum DjangoMeta {
+enum DjangoFiltering {
     Included {
         name: Option<syn::LitStr>,
         default_operator: (Option<syn::Ident>, Option<syn::Path>),
         operators: BTreeMap<String, Option<syn::Path>>,
     },
     Traversed, 
-    Excluded
+    Excluded,
+}
+
+#[derive(Debug)]
+struct DjangoMeta {
+    filtering: DjangoFiltering,
+    sort: Option<Option<syn::Ident>>
 }
 
 impl syn::parse::Parse for DjangoMeta {
@@ -96,7 +112,8 @@ impl syn::parse::Parse for DjangoMeta {
         let mut traversed = false;
         let punc =
             syn::punctuated::Punctuated::<DjangoItem, syn::Token![,]>::parse_terminated(input)?;
-
+        let mut sort = None;
+        
         for item in punc {
             match item {
                 DjangoItem::Rename(new_name) => {
@@ -121,27 +138,29 @@ impl syn::parse::Parse for DjangoMeta {
                     defop = (Some(op), None);
                 },
                 DjangoItem::Ignored => {
-                    eprintln!("Saw ignored");
                     excluded = true;
                 }
                 DjangoItem::Traversed => {
                     traversed = true;
                 },
+                DjangoItem::Sort(key) => {
+                    sort = Some(key)
+                }
             }
         }
-        if excluded {
-            eprintln!("Excluded");
-            Ok(Self::Excluded)
+        let filtering = if excluded {
+            DjangoFiltering::Excluded
         } else if traversed {
-            eprintln!("Traversed");
-            Ok(Self::Traversed)
+            DjangoFiltering::Traversed
         } else {
-            Ok(Self::Included {
+            DjangoFiltering::Included {
                 name: field_name,
                 default_operator: defop,
                 operators
-            })
-        }
+            }
+        };
+
+        Ok( Self { filtering, sort } )
     }
 }
 
@@ -187,8 +206,8 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                 
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        match attr.parse_args().expect("failed to parse django attribute") {
-                            DjangoMeta::Included { name, default_operator, operators: djoperators } => {
+                        match attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute").filtering {
+                            DjangoFiltering::Included { name, default_operator, operators: djoperators } => {
                                 if let Some(name) = name {
                                     fieldname = name;
                                 }
@@ -215,18 +234,16 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                                     _ => {}
                                 }
                             },
-                            DjangoMeta::Traversed => {
+                            DjangoFiltering::Traversed => {
                                 traversed = true;
                             },
-                            DjangoMeta::Excluded => {
-                                eprintln!("Marked excluded");
+                            DjangoFiltering::Excluded => {
                                 excluded = true;
-                            }
+                            },
                         }
                     }
                 }
                 if excluded {
-                    eprintln!("skipped");
                     continue;
                 }
                 
@@ -246,9 +263,9 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                     #[derive(Clone)]
                     struct #structname;
                     #[automatically_derived]
-                    impl #generics ::django_query::Field<#ident #generics> for #structname #wc {
+                    impl #generics ::django_query::filtering::Field<#ident #generics> for #structname #wc {
                         type Value = #fieldtype;
-                        fn apply<O: ::django_query::Operator<Self::Value>>(&self, op: &O, data: &#ident #generics) -> bool {
+                        fn apply<O: ::django_query::filtering::Operator<Self::Value>>(&self, op: &O, data: &#ident #generics) -> bool {
                             op.apply(&data.#fieldid)
                         }
                     }
@@ -264,12 +281,12 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                 } else {
                     structs.extend(quote::quote! {
                         #[automatically_derived]
-                        impl #generics ::django_query::Member<#ident #generics> for #structname #wc {
+                        impl #generics ::django_query::filtering::Member<#ident #generics> for #structname #wc {
                             type Value = #fieldtype;
-                            fn apply<O: ::django_query::Operator<<Self::Value as ::django_query::Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
+                            fn apply<O: ::django_query::filtering::Operator<<Self::Value as ::django_query::filtering::Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
                                 data.#fieldid.apply(op)
                             }  
-                            fn accept_visitor<V: ::django_query::MemberVisitor<Self, #ident #generics, <Self as ::django_query::Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
+                            fn accept_visitor<V: ::django_query::filtering::MemberVisitor<Self, #ident #generics, <Self as ::django_query::filtering::Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
                                 #fieldbody
                             }
                         }
@@ -289,8 +306,8 @@ pub fn queryable(input: TokenStream) -> TokenStream {
 
             structs.extend(quote::quote! {
                 pub struct MyRecord;
-                impl #generics ::django_query::Record<#ident #generics> for MyRecord #wc {
-                    fn accept_visitor<V: ::django_query::RecordVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
+                impl #generics ::django_query::filtering::Record<#ident #generics> for MyRecord #wc {
+                    fn accept_visitor<V: ::django_query::filtering::RecordVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
                         #body
                     }
                 }
@@ -310,6 +327,83 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                 type Meta = MyRecord;
                 fn get_meta() -> Self::Meta {
                     MyRecord
+                }
+            }
+        };
+    }
+    .into();
+
+    res
+}
+
+#[proc_macro_derive(Sortable, attributes(django))]
+pub fn sortable(input: TokenStream) -> TokenStream {
+    let syn::DeriveInput {
+        ident,
+        data,
+        generics,
+        ..
+    } = syn::parse_macro_input!(input);
+
+    let mut body = pm2::TokenStream::new();
+    let mut structs = pm2::TokenStream::new();
+    
+    let wc = generics.where_clause.as_ref();
+
+    if let syn::Data::Struct(s) = data {
+        if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
+            for field in named.iter() {
+                let fieldid = field.ident.as_ref().unwrap();
+                let fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
+                
+                for attr in field.attrs.iter() {
+                    if attr.path.is_ident("django") {
+                        if let Some(sort) = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute").sort {
+                            let structname =
+                                syn::Ident::new(&format!("{}Field", fieldid), pm2::Span::call_site());
+                            let fieldtype = &field.ty;
+
+                            structs.extend(quote::quote! {
+                                #[derive(Clone)]
+                                struct #structname;
+                                #[automatically_derived]
+                                impl #generics ::django_query::ordering::Field<#ident #generics> for #structname #wc {
+                                    type Value = #fieldtype;
+                                    fn value<'a>(&self, data: &'a #ident #generics) -> &'a Self::Value {
+                                        &data.#fieldid
+                                    }
+                                }
+                            });
+                            if let Some(key) = sort {
+                                body.extend(quote::quote! {
+                                    visitor.visit_key_sort(#fieldname, &#structname, stringify!(#key));
+                                });
+                            } else {
+                                body.extend(quote::quote! {
+                                    visitor.visit_sort(#fieldname, &#structname);
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            panic!("Sortable can only be derived for structs with named fields.");
+        }
+    } else {
+        panic!("Sortable can only be derived for structs with named fields.");
+    }
+
+    let res: TokenStream = quote::quote! {
+        const _: () = {
+            #structs
+            #[automatically_derived]
+            impl #generics ::django_query::Sortable for #ident #generics #wc {
+                fn accept_visitor<V: ::django_query::ordering::SortVisitor<Self>>(visitor: &mut V)
+                where
+                    Self: Sized
+                {
+                    #body
                 }
             }
         };
