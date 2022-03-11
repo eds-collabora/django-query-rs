@@ -10,3 +10,4 @@ anyhow = "1"
 thiserror = "1.0"
 django_derive= { path="../django_derive" }
 chrono = "0.4"
+serde_json = "1"

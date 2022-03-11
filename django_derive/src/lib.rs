@@ -33,6 +33,7 @@ enum DjangoItem {
     Traversed,
     Ignored,
     Sort(Option<syn::Ident>),
+    ForeignKey(syn::Ident),
 }
 
 impl syn::parse::Parse for DjangoItem {
@@ -78,6 +79,11 @@ impl syn::parse::Parse for DjangoItem {
                     Ok(DjangoItem::Sort(None))
                 }
             },
+            "foreign_key" => {
+                let _: syn::Token![=] = input.parse()?;
+                let key = input.parse()?;
+                Ok(DjangoItem::ForeignKey(key))
+            },
             _ => Err(syn::Error::new_spanned(
                 attr,
                 "unsupported django attribute",
@@ -98,9 +104,17 @@ enum DjangoFiltering {
 }
 
 #[derive(Debug)]
+enum DjangoCell {
+    Scalar,
+    ForeignRow(syn::Ident),
+    Excluded
+}
+
+#[derive(Debug)]
 struct DjangoMeta {
     filtering: DjangoFiltering,
-    sort: Option<Option<syn::Ident>>
+    sort: Option<Option<syn::Ident>>,
+    cell: DjangoCell,
 }
 
 impl syn::parse::Parse for DjangoMeta {
@@ -113,6 +127,7 @@ impl syn::parse::Parse for DjangoMeta {
         let punc =
             syn::punctuated::Punctuated::<DjangoItem, syn::Token![,]>::parse_terminated(input)?;
         let mut sort = None;
+        let mut foreign_key = None;
         
         for item in punc {
             match item {
@@ -145,6 +160,9 @@ impl syn::parse::Parse for DjangoMeta {
                 },
                 DjangoItem::Sort(key) => {
                     sort = Some(key)
+                },
+                DjangoItem::ForeignKey(key) => {
+                    foreign_key = Some(key)
                 }
             }
         }
@@ -159,8 +177,15 @@ impl syn::parse::Parse for DjangoMeta {
                 operators
             }
         };
+        let cell = if excluded {
+            DjangoCell::Excluded
+        } else if let Some(key) = foreign_key {
+            DjangoCell::ForeignRow(key)
+        } else {
+            DjangoCell::Scalar
+        };
 
-        Ok( Self { filtering, sort } )
+        Ok( Self { filtering, sort, cell } )
     }
 }
 
@@ -412,3 +437,78 @@ pub fn sortable(input: TokenStream) -> TokenStream {
 
     res
 }
+
+#[proc_macro_derive(IntoRow, attributes(django))]
+pub fn into_row(input: TokenStream) -> TokenStream {
+    let syn::DeriveInput {
+        ident,
+        data,
+        generics,
+        ..
+    } = syn::parse_macro_input!(input);
+
+    let mut body = pm2::TokenStream::new();
+    
+    let wc = generics.where_clause.as_ref();
+
+    if let syn::Data::Struct(s) = data {
+        if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
+            for field in named.iter() {
+                let fieldid = field.ident.as_ref().unwrap();
+                let fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
+                let fieldtype = &field.ty;
+
+                let mut excluded = false;
+                let mut key = None;
+                
+                for attr in field.attrs.iter() {
+                    if attr.path.is_ident("django") {
+                        let cell = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute").cell;
+                        match cell {
+                            DjangoCell::Excluded => { excluded = true; },
+                            DjangoCell::ForeignRow(fkey) => {
+                                key = Some(fkey)
+                            },
+                            DjangoCell::Scalar => {
+                            }
+                        }
+                    }
+                }
+                if !excluded {
+                    if let Some(key) = key {
+                        body.extend(quote::quote! {
+                            let mut k = ::django_query::row::KeyVisitor { target: stringify!(#key), value: None };
+                            <#fieldtype as ::django_query::row::IntoRow>::accept_visitor(&self.#fieldid, &mut k);
+                            visitor.visit_value(#fieldname, k.value.unwrap());
+                        });
+                    } else {
+                        body.extend(quote::quote! {
+                            visitor.visit_value(#fieldname, <#fieldtype as ::django_query::row::IntoCellValue>::to_cell_value(&self.#fieldid));
+                        });
+                    }
+                }
+            }
+        } else {
+            panic!("IntoRow can only be derived for structs with named fields.");
+        }
+    } else {
+        panic!("IntoRow can only be derived for structs with named fields.");
+    }
+
+    
+    let res: TokenStream = quote::quote! {
+        const _: () = {
+            #[automatically_derived]
+            impl #generics ::django_query::IntoRow for #ident #generics #wc {
+                fn accept_visitor<V: ::django_query::row::Visitor>(&self, visitor: &mut V)
+                {
+                    #body
+                }
+            }
+        };
+    }
+    .into();
+
+    res
+}
+

@@ -3,10 +3,6 @@ use std::str::FromStr;
 
 use crate::filtering::{FilterError, Operator, OperatorClass, Operable};
 
-pub struct EqImpl<T> {
-    target: T,
-}
-
 pub trait Scalar {}
 
 impl Scalar for i8 {}
@@ -31,6 +27,10 @@ where
         op.apply(self)
     }
 }    
+
+pub struct EqImpl<T> {
+    target: T,
+}
 
 impl<T> Operator<T> for EqImpl<T>
 where
