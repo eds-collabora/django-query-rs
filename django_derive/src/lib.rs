@@ -32,8 +32,8 @@ enum DjangoItem {
     DefaultOperator2(syn::Path),
     Traversed,
     Ignored,
-    Sort(Option<syn::Ident>),
-    ForeignKey(syn::Ident),
+    Sort(Option<syn::LitStr>),
+    ForeignKey(syn::LitStr),
 }
 
 impl syn::parse::Parse for DjangoItem {
@@ -73,7 +73,7 @@ impl syn::parse::Parse for DjangoItem {
                 if input.lookahead1().peek(syn::token::Paren) { 
                     let content;
                     let _: syn::token::Paren = syn::parenthesized!(content in input);
-                    let item: syn::Ident = content.parse()?;
+                    let item = content.parse()?;
                     Ok(DjangoItem::Sort(Some(item)))
                 } else {
                     Ok(DjangoItem::Sort(None))
@@ -95,7 +95,6 @@ impl syn::parse::Parse for DjangoItem {
 #[derive(Debug)]
 enum DjangoFiltering {
     Included {
-        name: Option<syn::LitStr>,
         default_operator: (Option<syn::Ident>, Option<syn::Path>),
         operators: BTreeMap<String, Option<syn::Path>>,
     },
@@ -106,14 +105,15 @@ enum DjangoFiltering {
 #[derive(Debug)]
 enum DjangoCell {
     Scalar,
-    ForeignRow(syn::Ident),
+    ForeignRow(syn::LitStr),
     Excluded
 }
 
 #[derive(Debug)]
 struct DjangoMeta {
+    name: Option<syn::LitStr>,
     filtering: DjangoFiltering,
-    sort: Option<Option<syn::Ident>>,
+    sort: Option<Option<syn::LitStr>>,
     cell: DjangoCell,
 }
 
@@ -172,7 +172,6 @@ impl syn::parse::Parse for DjangoMeta {
             DjangoFiltering::Traversed
         } else {
             DjangoFiltering::Included {
-                name: field_name,
                 default_operator: defop,
                 operators
             }
@@ -185,7 +184,7 @@ impl syn::parse::Parse for DjangoMeta {
             DjangoCell::Scalar
         };
 
-        Ok( Self { filtering, sort, cell } )
+        Ok( Self { filtering, sort, cell, name: field_name } )
     }
 }
 
@@ -231,11 +230,9 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                 
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        match attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute").filtering {
-                            DjangoFiltering::Included { name, default_operator, operators: djoperators } => {
-                                if let Some(name) = name {
-                                    fieldname = name;
-                                }
+                        let parsed = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute");
+                        match parsed.filtering {
+                            DjangoFiltering::Included { default_operator, operators: djoperators } => {
                                 for (key, value) in djoperators {
                                     if let Some(value) = value {
                                         operators.insert(key, value);
@@ -265,6 +262,9 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                             DjangoFiltering::Excluded => {
                                 excluded = true;
                             },
+                        };
+                        if let Some(name) = parsed.name {
+                            fieldname = name;
                         }
                     }
                 }
@@ -379,36 +379,45 @@ pub fn sortable(input: TokenStream) -> TokenStream {
         if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
             for field in named.iter() {
                 let fieldid = field.ident.as_ref().unwrap();
-                let fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
+                let mut fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
+                let mut sort = None;
                 
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        if let Some(sort) = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute").sort {
-                            let structname =
-                                syn::Ident::new(&format!("{}Field", fieldid), pm2::Span::call_site());
-                            let fieldtype = &field.ty;
+                        let parsed = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute");
+                        if let Some(name) = parsed.name {
+                            fieldname = name;
+                        }
+                        if let Some(s) = parsed.sort {
+                            sort = Some(s);
+                        }
+                    }
+                }
 
-                            structs.extend(quote::quote! {
-                                #[derive(Clone)]
-                                struct #structname;
-                                #[automatically_derived]
-                                impl #generics ::django_query::ordering::Field<#ident #generics> for #structname #wc {
-                                    type Value = #fieldtype;
-                                    fn value<'a>(&self, data: &'a #ident #generics) -> &'a Self::Value {
-                                        &data.#fieldid
-                                    }
-                                }
-                            });
-                            if let Some(key) = sort {
-                                body.extend(quote::quote! {
-                                    visitor.visit_key_sort(#fieldname, &#structname, stringify!(#key));
-                                });
-                            } else {
-                                body.extend(quote::quote! {
-                                    visitor.visit_sort(#fieldname, &#structname);
-                                });
+                if let Some(sort) = sort {
+                    let structname =
+                        syn::Ident::new(&format!("{}Field", fieldid), pm2::Span::call_site());
+                    let fieldtype = &field.ty;
+
+                    structs.extend(quote::quote! {
+                        #[derive(Clone)]
+                        struct #structname;
+                        #[automatically_derived]
+                        impl #generics ::django_query::ordering::Field<#ident #generics> for #structname #wc {
+                            type Value = #fieldtype;
+                            fn value<'a>(&self, data: &'a #ident #generics) -> &'a Self::Value {
+                                &data.#fieldid
                             }
                         }
+                    });
+                    if let Some(key) = sort {
+                        body.extend(quote::quote! {
+                            visitor.visit_key_sort(#fieldname, &#structname, #key);
+                        });
+                    } else {
+                        body.extend(quote::quote! {
+                            visitor.visit_sort(#fieldname, &#structname);
+                        });
                     }
                 }
             }
@@ -456,7 +465,7 @@ pub fn into_row(input: TokenStream) -> TokenStream {
         if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
             for field in named.iter() {
                 let fieldid = field.ident.as_ref().unwrap();
-                let fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
+                let mut fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
                 let fieldtype = &field.ty;
 
                 let mut excluded = false;
@@ -464,7 +473,8 @@ pub fn into_row(input: TokenStream) -> TokenStream {
                 
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        let cell = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute").cell;
+                        let parsed = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute");
+                        let cell = parsed.cell;
                         match cell {
                             DjangoCell::Excluded => { excluded = true; },
                             DjangoCell::ForeignRow(fkey) => {
@@ -473,14 +483,17 @@ pub fn into_row(input: TokenStream) -> TokenStream {
                             DjangoCell::Scalar => {
                             }
                         }
+                        if let Some(name) = parsed.name {
+                            fieldname = name;
+                        }
                     }
                 }
                 if !excluded {
                     if let Some(key) = key {
                         cells.extend(quote::quote! {
-                            let mut k = ::django_query::row::KeyVisitor { target: stringify!(#key), value: None };
+                            let mut k = ::django_query::row::KeyVisitor { target: #key, value: None };
                             <#fieldtype as ::django_query::row::IntoRow>::accept_cell_visitor(&self.#fieldid, &mut k);
-                            visitor.visit_value(#fieldname, k.value.unwrap());
+                            visitor.visit_value(#fieldname, k.value.unwrap_or_else(|| CellValue::Null));
                         });
                     } else {
                         cells.extend(quote::quote! {

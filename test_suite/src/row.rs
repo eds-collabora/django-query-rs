@@ -8,6 +8,7 @@ use serde_json::value::Value;
 use serde_json::Number;
 
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 #[derive(IntoRow)]
 struct Record {
@@ -30,8 +31,14 @@ fn subset<X: Eq + Ord, Y: Eq>(a: &BTreeMap<X, Y>, b: &BTreeMap<X, Y>) -> bool {
 }
     
 #[cfg(test)]
-fn equal_maps<X: Eq + Ord, Y: Eq>(a: &BTreeMap<X, Y>, b: &BTreeMap<X, Y>) -> bool {
-    subset(a, b) && subset(b, a)
+fn equal_maps<X: Eq + Ord + Debug, Y: Eq + Debug>(a: &BTreeMap<X, Y>, b: &BTreeMap<X, Y>) -> bool {
+    if !(subset(a, b) && subset(b, a)) {
+        eprintln!("LHS: {:?}", a);
+        eprintln!("RHS: {:?}", b);
+        false
+    } else {
+        true
+    }
 }
     
 #[test]
@@ -50,7 +57,7 @@ fn test_basic() {
 
 #[derive(IntoRow)]
 struct Record2 {
-    #[django(foreign_key=int_field)]
+    #[django(foreign_key="int_field")]
     nest: Record,
     string_field: String,
     int_field: i32
@@ -58,7 +65,7 @@ struct Record2 {
 
 #[derive(IntoRow)]
 struct Record3 {
-    #[django(foreign_key=string_field)]
+    #[django(foreign_key="string_field")]
     nest: Record,
     string_field: String,
     int_field: i32
@@ -121,3 +128,37 @@ fn test_columns() {
     assert_eq!(Record3::columns(), vec!["nest".to_string(), "string_field".to_string(), "int_field".to_string()]);
     assert_eq!(Record4::columns(), vec!["string_field".to_string(), "int_field".to_string()]);
 }
+
+#[derive(IntoRow)]
+struct Record6 {
+    #[django(rename="womble")]
+    string_field: String,
+    int_field: i32
+}
+
+#[derive(IntoRow)]
+struct Record5 {
+    #[django(rename="NESTED_STRING",foreign_key="womble")]
+    nest: Record6,
+    #[django(rename="OUTER_STRING")]
+    string_field: String,
+    int_field: i32
+}
+
+#[test]
+fn test_rename() {
+    assert_eq!(Record5::columns(), vec!["NESTED_STRING".to_string(), "OUTER_STRING".to_string(), "int_field".to_string()]);
+
+    let r = Record5 { nest: Record6 { string_field: "nesting".to_string(), int_field: 15 }, string_field: "hello".to_string(), int_field: 1 };
+
+    let v = r.to_row();
+
+    let compare = BTreeMap::from([
+        ("OUTER_STRING".to_string(), CellValue::String("hello".to_string())),
+        ("int_field".to_string(), CellValue::Number(Number::from(1i32))),
+        ("NESTED_STRING".to_string(), CellValue::String("nesting".to_string())),
+    ]);
+    
+    assert!(equal_maps(&v, &compare));
+}
+    

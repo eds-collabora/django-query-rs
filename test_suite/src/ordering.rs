@@ -352,9 +352,9 @@ fn test_deeper_nesting() {
 
 #[derive(Sortable)]
 struct MyRecord4 {
-    #[django(sort(foo))]
+    #[django(sort("foo"))]
     bar: MyRecord2,
-    #[django(sort(int_field))]
+    #[django(sort("int_field"))]
     foo: MyRecord,
     #[django(sort)]
     int_field: i32,
@@ -480,6 +480,150 @@ fn test_macro() {
     assert_eq!(v[3].int_field, 4);
 
     let sort = sr.create_sort("-bar").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 4);
+    assert_eq!(v[1].int_field, 3);
+    assert_eq!(v[2].int_field, 1);
+    assert_eq!(v[3].int_field, 2);
+}
+
+#[derive(Sortable)]
+struct MyRecord6 {
+    #[django(rename="foot", sort("string_field"))]
+    foo: MyRecord,
+    #[django(rename="i32", sort)]
+    int_field: i32,
+}
+
+#[derive(Sortable)]
+struct MyRecord5 {
+    #[django(rename="barbar", sort("foot"))]
+    bar: MyRecord6,
+    #[django(rename="womble", sort("int_field"))]
+    foo: MyRecord,
+    #[django(rename="int", sort)]
+    int_field: i32,
+    #[django(rename="str", sort)]
+    string_field: String,
+}
+
+#[test]
+fn test_rename() {
+    let mut v = vec![
+        MyRecord5 {
+            bar: MyRecord6 {
+                foo: MyRecord {
+                    string_field: "a".to_string(),
+                    int_field: 1,
+                },
+                int_field: 1,
+            },
+            foo: MyRecord {
+                string_field: "a".to_string(),
+                int_field: 3,
+            },
+            int_field: 2,
+            string_field: "d".to_string(),
+        },
+        MyRecord5 {
+            bar: MyRecord6 {
+                foo: MyRecord {
+                    string_field: "b".to_string(),
+                    int_field: 2,
+                },
+                int_field: 3,
+            },
+            foo: MyRecord {
+                string_field: "b".to_string(),
+                int_field: 2,
+            },
+            int_field: 1,
+            string_field: "c".to_string(),
+        },
+        MyRecord5 {
+            bar: MyRecord6 {
+                foo: MyRecord {
+                    string_field: "c".to_string(),
+                    int_field: 4,
+                },
+                int_field: 2,
+            },
+            foo: MyRecord {
+                string_field: "d".to_string(),
+                int_field: 1,
+            },
+            int_field: 3,
+            string_field: "a".to_string(),
+        },
+        MyRecord5 {
+            bar: MyRecord6 {
+                foo: MyRecord {
+                    string_field: "d".to_string(),
+                    int_field: 3,
+                },
+                int_field: 4,
+            },
+            foo: MyRecord {
+                string_field: "c".to_string(),
+                int_field: 4,
+            },
+           int_field: 4,
+           string_field: "b".to_string(),
+        },
+    ];
+
+    let sr = ordering::SortableRecord::<MyRecord5>::new();
+
+    let sort = sr.create_sort("int").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 1);
+    assert_eq!(v[1].int_field, 2);
+    assert_eq!(v[2].int_field, 3);
+    assert_eq!(v[3].int_field, 4);
+
+    let sort = sr.create_sort("-int").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 4);
+    assert_eq!(v[1].int_field, 3);
+    assert_eq!(v[2].int_field, 2);
+    assert_eq!(v[3].int_field, 1);
+
+    let sort = sr.create_sort("str").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 3);
+    assert_eq!(v[1].int_field, 4);
+    assert_eq!(v[2].int_field, 1);
+    assert_eq!(v[3].int_field, 2);
+
+    let sort = sr.create_sort("-str").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 2);
+    assert_eq!(v[1].int_field, 1);
+    assert_eq!(v[2].int_field, 4);
+    assert_eq!(v[3].int_field, 3);
+    
+    let sort = sr.create_sort("womble").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 3);
+    assert_eq!(v[1].int_field, 1);
+    assert_eq!(v[2].int_field, 2);
+    assert_eq!(v[3].int_field, 4);
+
+    let sort = sr.create_sort("-womble").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 4);
+    assert_eq!(v[1].int_field, 2);
+    assert_eq!(v[2].int_field, 1);
+    assert_eq!(v[3].int_field, 3);
+
+    let sort = sr.create_sort("barbar").unwrap();
+    sort.sort_vec(&mut v);
+    assert_eq!(v[0].int_field, 2);
+    assert_eq!(v[1].int_field, 1);
+    assert_eq!(v[2].int_field, 3);
+    assert_eq!(v[3].int_field, 4);
+
+    let sort = sr.create_sort("-barbar").unwrap();
     sort.sort_vec(&mut v);
     assert_eq!(v[0].int_field, 4);
     assert_eq!(v[1].int_field, 3);
