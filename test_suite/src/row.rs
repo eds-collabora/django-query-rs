@@ -161,4 +161,49 @@ fn test_rename() {
     
     assert!(equal_maps(&v, &compare));
 }
+
+#[derive(IntoRow)]
+struct Record7 {
+    #[django(rename="NESTED_STRING", foreign_key="womble")]
+    nest: Vec<Record6>,
+    #[django(rename="OUTER_STRING")]
+    string_field: String,
+    int_field: i32
+}
+
+#[test]
+fn test_array() {
+    assert_eq!(Record7::columns(), vec!["NESTED_STRING".to_string(), "OUTER_STRING".to_string(), "int_field".to_string()]);
+
+    let r = Record7 {
+        nest: vec![
+            Record6 { string_field: "nesting".to_string(), int_field: 15 },
+            Record6 { string_field: "nosting".to_string(), int_field: 1 },
+            Record6 { string_field: "nisting".to_string(), int_field: 12 },
+            Record6 { string_field: "nasting".to_string(), int_field: 11 },
+            Record6 { string_field: "nusting".to_string(), int_field: 52 }
+        ] ,
+        string_field: "hello".to_string(),
+        int_field: 1
+    };
+
+    let v = r.to_row();
+
+    let compare = BTreeMap::from([
+        ("OUTER_STRING".to_string(), CellValue::String("hello".to_string())),
+        ("int_field".to_string(), CellValue::Number(Number::from(1i32))),
+        ("NESTED_STRING".to_string(),
+         CellValue::Array(
+             vec![
+                 CellValue::String("nesting".to_string()),
+                 CellValue::String("nosting".to_string()),
+                 CellValue::String("nisting".to_string()),
+                 CellValue::String("nasting".to_string()),
+                 CellValue::String("nusting".to_string()),
+             ])
+        )
+    ]);
+
+    assert!(equal_maps(&v, &compare));
+}
     

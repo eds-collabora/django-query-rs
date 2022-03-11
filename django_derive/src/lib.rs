@@ -488,9 +488,7 @@ pub fn into_row(input: TokenStream) -> TokenStream {
                 if !excluded {
                     if let Some(key) = key {
                         cells.extend(quote::quote! {
-                            let mut k = ::django_query::row::KeyVisitor { target: #key, value: None };
-                            <#fieldtype as ::django_query::row::IntoRow>::accept_cell_visitor(&self.#fieldid, &mut k);
-                            visitor.visit_value(#fieldname, k.value.unwrap_or_else(|| CellValue::Null));
+                            visitor.visit_value(#fieldname, <#fieldtype as ::django_query::row::AsForeignKey>::as_foreign_key(&self.#fieldid, #key));
                         });
                     } else {
                         cells.extend(quote::quote! {

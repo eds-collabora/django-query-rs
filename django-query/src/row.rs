@@ -14,7 +14,8 @@ pub enum CellValue {
     Null,
     Bool(bool),
     Number(Number),
-    String(String)
+    String(String),
+    Array(Vec<CellValue>),
 }
 
 pub trait IntoCellValue {
@@ -136,12 +137,40 @@ pub trait IntoRow {
     }
 }
 
-pub struct KeyVisitor<'a> {
+pub trait AsForeignKey {
+    fn as_foreign_key(&self, name: &str) -> CellValue;
+}
+
+impl<T> AsForeignKey for T
+where
+    T: IntoRow
+{
+    fn as_foreign_key(&self, name: &str) -> CellValue {
+        let mut k = ForeignKeyVisitor { target: name, value: None };
+        self.accept_cell_visitor(&mut k);
+        k.value.unwrap_or_else(|| CellValue::Null)
+    }
+}
+
+impl<T> AsForeignKey for Vec<T>
+where
+    T: AsForeignKey
+{
+    fn as_foreign_key(&self, name: &str) -> CellValue {
+        let mut v = Vec::new();
+        for item in self.into_iter() {
+            v.push(item.as_foreign_key(name))
+        }
+        CellValue::Array(v)
+    }
+}
+
+pub struct ForeignKeyVisitor<'a> {
     pub target: &'a str,
     pub value: Option<CellValue>
 }
 
-impl<'a> CellVisitor for KeyVisitor<'a> {
+impl<'a> CellVisitor for ForeignKeyVisitor<'a> {
     fn visit_value(&mut self, name: &str, v: CellValue) {
         if name == self.target {
             self.value = Some(v);
@@ -159,19 +188,25 @@ impl CellVisitor for RowVisitor {
     }
 }
 
+impl From<CellValue> for Value {
+    fn from(v: CellValue) -> Self {
+        match v {
+            CellValue::Null => Value::Null,
+            CellValue::Bool(b) => Value::Bool(b),
+            CellValue::Number(n) => Value::Number(n),
+            CellValue::String(s) => Value::String(s),
+            CellValue::Array(a) => Value::Array(a.into_iter().map(|x| x.into()).collect())
+        }
+    }
+}
+
 struct JsonVisitor {
     pub value: serde_json::map::Map<String, Value>
 }
 
 impl CellVisitor for JsonVisitor {
     fn visit_value(&mut self, name: &str, v: CellValue) {
-        let v = match v {
-            CellValue::Null => Value::Null,
-            CellValue::Bool(b) => Value::Bool(b),
-            CellValue::Number(n) => Value::Number(n),
-            CellValue::String(s) => Value::String(s)
-        };
-        self.value.insert(name.to_string(), v);
+        self.value.insert(name.to_string(), v.into());
     }
 }
 
