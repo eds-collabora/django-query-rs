@@ -298,10 +298,7 @@ pub fn queryable(input: TokenStream) -> TokenStream {
 
                 if traversed {
                     body.extend(quote::quote! {
-                        {
-                            type DjangoNested = #fieldtype;
-                            visitor.visit_record(#fieldname, &#structname, &DjangoNested::get_meta());
-                        }
+                        visitor.visit_record(#fieldname, &#structname, &<#fieldtype as ::django_query::filtering::Queryable>::get_meta());
                     });
                 } else {
                     structs.extend(quote::quote! {
