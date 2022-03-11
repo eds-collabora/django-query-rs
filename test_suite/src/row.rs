@@ -114,4 +114,10 @@ fn test_exclude() {
     assert!(equal_maps(&v, &compare));
 }
 
-    
+#[test]
+fn test_columns() {
+    assert_eq!(Record::columns(), vec!["string_field".to_string(), "int_field".to_string()]);
+    assert_eq!(Record2::columns(), vec!["nest".to_string(), "string_field".to_string(), "int_field".to_string()]);
+    assert_eq!(Record3::columns(), vec!["nest".to_string(), "string_field".to_string(), "int_field".to_string()]);
+    assert_eq!(Record4::columns(), vec!["string_field".to_string(), "int_field".to_string()]);
+}

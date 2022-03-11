@@ -447,7 +447,8 @@ pub fn into_row(input: TokenStream) -> TokenStream {
         ..
     } = syn::parse_macro_input!(input);
 
-    let mut body = pm2::TokenStream::new();
+    let mut cells = pm2::TokenStream::new();
+    let mut cols = pm2::TokenStream::new();
     
     let wc = generics.where_clause.as_ref();
 
@@ -476,16 +477,19 @@ pub fn into_row(input: TokenStream) -> TokenStream {
                 }
                 if !excluded {
                     if let Some(key) = key {
-                        body.extend(quote::quote! {
+                        cells.extend(quote::quote! {
                             let mut k = ::django_query::row::KeyVisitor { target: stringify!(#key), value: None };
-                            <#fieldtype as ::django_query::row::IntoRow>::accept_visitor(&self.#fieldid, &mut k);
+                            <#fieldtype as ::django_query::row::IntoRow>::accept_cell_visitor(&self.#fieldid, &mut k);
                             visitor.visit_value(#fieldname, k.value.unwrap());
                         });
                     } else {
-                        body.extend(quote::quote! {
+                        cells.extend(quote::quote! {
                             visitor.visit_value(#fieldname, <#fieldtype as ::django_query::row::IntoCellValue>::to_cell_value(&self.#fieldid));
                         });
                     }
+                    cols.extend(quote::quote! {
+                        visitor.visit_column(#fieldname);
+                    });
                 }
             }
         } else {
@@ -500,9 +504,13 @@ pub fn into_row(input: TokenStream) -> TokenStream {
         const _: () = {
             #[automatically_derived]
             impl #generics ::django_query::IntoRow for #ident #generics #wc {
-                fn accept_visitor<V: ::django_query::row::Visitor>(&self, visitor: &mut V)
+                fn accept_cell_visitor<V: ::django_query::row::CellVisitor>(&self, visitor: &mut V)
                 {
-                    #body
+                    #cells
+                }
+                fn accept_column_visitor<V: ::django_query::row::ColumnVisitor>(visitor: &mut V)
+                {
+                    #cols
                 }
             }
         };
