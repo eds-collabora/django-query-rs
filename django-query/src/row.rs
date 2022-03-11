@@ -6,6 +6,7 @@ you want this.
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
+use chrono::DateTime;
 use serde_json::Number;
 use serde_json::value::Value;
 
@@ -104,6 +105,35 @@ impl IntoCellValue for f32 {
 impl IntoCellValue for f64 {
     fn to_cell_value(&self) -> CellValue {
         serde_json::Number::from_f64(*self).map(CellValue::Number).unwrap_or_else(|| CellValue::Null)
+    }
+}
+
+impl IntoCellValue for bool {
+    fn to_cell_value(&self) -> CellValue {
+        CellValue::Bool(*self)
+    }
+}    
+
+impl<T> IntoCellValue for DateTime<T>
+where
+    T: chrono::TimeZone,
+    <T as chrono::TimeZone>::Offset: Display
+{
+    fn to_cell_value(&self)  -> CellValue {
+        CellValue::String(self.to_rfc3339())
+    }
+}
+
+impl<T> IntoCellValue for Option<T>
+where
+    T: IntoCellValue
+{
+    fn to_cell_value(&self) -> CellValue {
+        if let Some(ref x) = self {
+            x.to_cell_value()
+        } else {
+            CellValue::Null
+        }
     }
 }
 

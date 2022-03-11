@@ -306,7 +306,7 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                         impl #generics ::django_query::filtering::Member<#ident #generics> for #structname #wc {
                             type Value = #fieldtype;
                             fn apply<O: ::django_query::filtering::Operator<<Self::Value as ::django_query::filtering::Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
-                                data.#fieldid.apply(op)
+                                <Self::Value as ::django_query::filtering::Operable>::apply(&data.#fieldid, op)
                             }  
                             fn accept_visitor<V: ::django_query::filtering::MemberVisitor<Self, #ident #generics, <Self as ::django_query::filtering::Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
                                 #fieldbody
