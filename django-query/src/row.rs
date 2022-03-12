@@ -167,6 +167,24 @@ pub trait IntoRow {
     }
 }
 
+impl<T> IntoRow for Option<T>
+where
+    T: IntoRow
+{
+    fn accept_cell_visitor<V: CellVisitor>(&self, visitor: &mut V) {
+        if let Some(ref item) = self {
+            item.accept_cell_visitor(visitor);
+        } else {
+            let mut n = NullColumnVisitor { parent: visitor };
+            T::accept_column_visitor(&mut n);
+        }
+    }
+
+    fn accept_column_visitor<V: ColumnVisitor>(visitor: &mut V) {
+        T::accept_column_visitor(visitor);
+    }
+}
+
 pub trait AsForeignKey {
     fn as_foreign_key(&self, name: &str) -> CellValue;
 }
@@ -247,5 +265,18 @@ struct ColumnListVisitor {
 impl ColumnVisitor for ColumnListVisitor {
     fn visit_column(&mut self, name: &str) {
         self.value.push(name.to_string())
+    }
+}
+
+struct NullColumnVisitor<'a, V> {
+    parent: &'a mut V
+}
+
+impl<'a, V> ColumnVisitor for NullColumnVisitor<'a, V>
+where
+    V: CellVisitor
+{
+    fn visit_column(&mut self, name: &str) {
+        self.parent.visit_value(name, CellValue::Null);
     }
 }
