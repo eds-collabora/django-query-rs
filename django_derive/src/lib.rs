@@ -400,12 +400,13 @@ pub fn sortable(input: TokenStream) -> TokenStream {
                         #[derive(Clone)]
                         struct #structname;
                         #[automatically_derived]
-                        impl #generics ::django_query::ordering::Field<#ident #generics> for #structname #wc {
+                        impl #generics ::django_query::ordering::Accessor<#ident #generics> for #structname #wc {
                             type Value = #fieldtype;
                             fn value<'a>(&self, data: &'a #ident #generics) -> &'a Self::Value {
                                 &data.#fieldid
                             }
                         }
+                        impl #generics ::django_query::ordering::ReferenceField for #structname #wc {}
                     });
                     if let Some(key) = sort {
                         body.extend(quote::quote! {

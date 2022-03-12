@@ -16,9 +16,49 @@ pub enum SorterError {
     NoSort(String)
 }
 
+pub trait UnOp<T> {
+    type Result;
+    fn apply(&self, a: &T) -> Self::Result;
+}
+
+pub trait BinOp<T> {
+    type Result;
+    fn apply(&self, a: &T, b: &T) -> Self::Result;
+}
+
+struct Compare;
+
+impl<T: Ord> BinOp<T> for Compare {
+    type Result = Ordering;
+    fn apply(&self, a: &T, b: &T) -> Self::Result {
+        a.cmp(b)
+    }
+}
+
 pub trait Field<R>: Clone {
     type Value;
+    fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &R) -> V::Result;
+    fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &R, b: &R) -> V::Result;
+}
+
+pub trait Accessor<R>: Clone {
+    type Value;
     fn value<'a>(&self, data: &'a R) -> &'a Self::Value;
+}
+
+pub trait ReferenceField {}
+
+impl<R, F> Field<R> for F
+where
+    F: Accessor<R> + ReferenceField
+{
+    type Value = <F as Accessor<R>>::Value;
+    fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &R) -> V::Result {
+        op.apply(self.value(a))
+    }
+    fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &R, b: &R) -> V::Result {
+        op.apply(self.value(a), self.value(b))
+    }
 }
 
 pub trait Sorter<R> {
@@ -45,7 +85,7 @@ where
     T: Ord
 {
     fn compare(&self, a: &R, b: &R) -> Ordering {
-        self.field.value(a).cmp(self.field.value(b))
+        self.field.apply_binop(&Compare, a, b)
     }
 }
 
@@ -111,6 +151,52 @@ pub trait SortVisitor<R> {
 pub trait Sortable {
     fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V) where Self: Sized;
 }
+
+// #[derive(Clone)]
+// struct OptionField<F> {
+//     inner: F
+// }
+
+// impl<R, F, T> Field<Option<R>> for OptionField<F>
+// where
+//     F: Field<R, Value=T>
+// {
+//     type Value = Option<T>;
+//     fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &Option<R>) -> V::Result {
+//         if let Some(a) = a.as_ref() {
+//             self.inner.apply_unop(OptionVisitor { parent: &mut op })
+//         } else {
+//             op.apply(&None)
+//         }
+//     }
+//     fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &Option<R>, b: &Option<R>) -> V::Result {
+//         self.inner.apply_binop
+//     }
+// }
+
+// struct OptionVisitor<'a, V> {
+//     parent: &'a V
+// }
+
+// impl<'a, 'o, V, T> UnOp<T> for OptionVisitor<'a, V>
+// where
+//     V: UnOp<Option<&'o T>>
+// {
+//     type Result = <V as UnOp<Option<&'o T>>>::Result;
+//     fn apply(&self, a: &'o T) -> Self::Result {
+//         self.parent.apply(&Some(a))
+//     }
+// }
+
+// impl<'a, V, T> BinOp<T> for OptionVisitor<'a, V>
+// where
+//     V: for<'o> BinOp<Option<&'o T>>
+// {
+//     type Result = V::Result;
+//     fn apply(&self, a: &T) -> Self::Result {
+//         self.parent.apply(Some(a))
+//     }
+// }
 
 pub struct SortableRecord<R> {
     sorts: BTreeMap<String, Box<dyn SorterClass<R>>>
@@ -190,9 +276,9 @@ where
     G: Field<S, Value=R> + 'static,
     R: 'static
 {
-    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    fn visit_sort<F,T>(&mut self, name: &str, field: &F)
     where
-        F: Field<R, Value=T> + 'static,
+        F: Field<R,Value=T> + 'static,
         T: Ord
     {
         if name == self.key {
@@ -200,7 +286,7 @@ where
         }
     }
 
-    fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, key: &str)
+    fn visit_key_sort<F,T>(&mut self, name: &str, field: &F, key: &str)
     where
         F: Field<R, Value=T> + 'static,
         T: Sortable + 'static
@@ -243,8 +329,42 @@ where
     T: 'static
 {
     type Value = U;
-    fn value<'a>(&self, data: &'a R) -> &'a U {
-        self.inner.value(self.outer.value(data))
+    fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &R) -> V::Result {
+        let n = NestedOp { inner: &self.inner, op: op };
+        self.outer.apply_unop(&n, a)
+    }
+    fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &R, b: &R) -> V::Result {
+        let n = NestedOp { inner: &self.inner, op: op };
+        self.outer.apply_binop(&n, a, b)
+    }
+}
+
+struct NestedOp<'a, 'b, F, P> {
+    inner: &'a F,
+    op: &'b P
+}
+
+impl<'a,'b, F,P,T,U> UnOp<T> for NestedOp<'a, 'b, F, P>
+where
+    F: Field<T, Value=U>,
+    P: UnOp<U>
+{
+    type Result = <P as UnOp<U>>::Result;
+
+    fn apply(&self, a: &T) -> Self::Result {
+        self.inner.apply_unop(self.op, a)
+    }
+}
+
+impl<'a,'b, F,P,T,U> BinOp<T> for NestedOp<'a, 'b, F, P>
+where
+    F: Field<T, Value=U>,
+    P: BinOp<U>
+{
+    type Result = <P as BinOp<U>>::Result;
+
+    fn apply(&self, a: &T, b: &T) -> Self::Result {
+        self.inner.apply_binop(self.op, a, b)
     }
 }
 

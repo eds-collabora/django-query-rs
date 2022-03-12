@@ -8,22 +8,24 @@ struct MyRecord {
 #[derive(Clone)]
 struct StringField;
 
-impl ordering::Field<MyRecord> for StringField {
+impl ordering::Accessor<MyRecord> for StringField {
     type Value = String;
     fn value<'a>(&self, data: &'a MyRecord) -> &'a String {
         &data.string_field
     }
 }
+impl ordering::ReferenceField for StringField {}
 
 #[derive(Clone)]
 struct IntField;
 
-impl ordering::Field<MyRecord> for IntField {
+impl ordering::Accessor<MyRecord> for IntField {
     type Value = i32;
     fn value<'a>(&self, data: &'a MyRecord) -> &'a i32 {
         &data.int_field
     }
 }
+impl ordering::ReferenceField for IntField {}
 
 impl ordering::Sortable for MyRecord {
     fn accept_visitor<V: ordering::SortVisitor<Self>>(visitor: &mut V)
@@ -87,22 +89,24 @@ struct MyRecord2 {
 #[derive(Clone)]
 struct FooField2;
 
-impl ordering::Field<MyRecord2> for FooField2 {
+impl ordering::Accessor<MyRecord2> for FooField2 {
     type Value = MyRecord;
     fn value<'a>(&self, data: &'a MyRecord2) -> &'a MyRecord {
         &data.foo
     }
 }
+impl ordering::ReferenceField for FooField2 {}
 
 #[derive(Clone)]
 struct IntField2;
 
-impl ordering::Field<MyRecord2> for IntField2 {
+impl ordering::Accessor<MyRecord2> for IntField2 {
     type Value = i32;
     fn value<'a>(&self, data: &'a MyRecord2) -> &'a i32 {
         &data.int_field
     }
 }
+impl ordering::ReferenceField for IntField2 {}
 
 impl ordering::Sortable for MyRecord2 {
     fn accept_visitor<V: ordering::SortVisitor<Self>>(visitor: &mut V)
@@ -177,42 +181,46 @@ struct MyRecord3 {
 #[derive(Clone)]
 struct BarField3;
 
-impl ordering::Field<MyRecord3> for BarField3 {
+impl ordering::Accessor<MyRecord3> for BarField3 {
     type Value = MyRecord2;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a MyRecord2 {
         &data.bar
     }
 }
+impl ordering::ReferenceField for BarField3 {}
 
 #[derive(Clone)]
 struct FooField3;
 
-impl ordering::Field<MyRecord3> for FooField3 {
+impl ordering::Accessor<MyRecord3> for FooField3 {
     type Value = MyRecord;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a MyRecord {
         &data.foo
     }
 }
+impl ordering::ReferenceField for FooField3 {}
 
 #[derive(Clone)]
 struct IntField3;
 
-impl ordering::Field<MyRecord3> for IntField3 {
+impl ordering::Accessor<MyRecord3> for IntField3 {
     type Value = i32;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a i32 {
         &data.int_field
     }
 }
+impl ordering::ReferenceField for IntField3 {}
 
 #[derive(Clone)]
 struct StringField3;
 
-impl ordering::Field<MyRecord3> for StringField3 {
+impl ordering::Accessor<MyRecord3> for StringField3 {
     type Value = String;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a String {
         &data.string_field
     }
 }
+impl ordering::ReferenceField for StringField3 {}
 
 impl ordering::Sortable for MyRecord3 {
     fn accept_visitor<V: ordering::SortVisitor<Self>>(visitor: &mut V)
