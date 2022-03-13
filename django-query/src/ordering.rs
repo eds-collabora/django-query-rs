@@ -141,51 +141,75 @@ pub trait Sortable {
     fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V) where Self: Sized;
 }
 
-// #[derive(Clone)]
-// struct OptionField<F> {
-//     inner: F
-// }
+impl<T> Sortable for Option<T>
+where
+    T: Sortable
+{
+    fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V) where Self: Sized {
+        let mut v = OptionVisitor { parent: visitor };
+        T::accept_visitor(&mut v);
+    }
+}
 
-// impl<R, F, T> Field<Option<R>> for OptionField<F>
-// where
-//     F: Field<R, Value=T>
-// {
-//     type Value = Option<T>;
-//     fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &Option<R>) -> V::Result {
-//         if let Some(a) = a.as_ref() {
-//             self.inner.apply_unop(OptionVisitor { parent: &mut op })
-//         } else {
-//             op.apply(&None)
-//         }
-//     }
-//     fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &Option<R>, b: &Option<R>) -> V::Result {
-//         self.inner.apply_binop
-//     }
-// }
+struct OptionVisitor<'a, P> {
+    parent: &'a mut P
+}
 
-// struct OptionVisitor<'a, V> {
-//     parent: &'a V
-// }
+impl<'a, P, R> SortVisitor<R> for OptionVisitor<'a, P>
+where
+    P: SortVisitor<Option<R>>
+{
+    fn visit_sort<F,T>(&mut self, name: &str, field: &F)
+    where
+        F: Field<R, Value=T> + 'static,
+        T: Ord
+    {
+        self.parent.visit_sort(name, &OptionField { inner: field.clone() });
+    }
 
-// impl<'a, 'o, V, T> UnOp<T> for OptionVisitor<'a, V>
-// where
-//     V: UnOp<Option<&'o T>>
-// {
-//     type Result = <V as UnOp<Option<&'o T>>>::Result;
-//     fn apply(&self, a: &'o T) -> Self::Result {
-//         self.parent.apply(&Some(a))
-//     }
-// }
+    fn visit_key_sort<F,T>(&mut self, name: &str, field: &F, sort_key: &str)
+    where
+        F: Field<R, Value=T> + 'static,
+        T: Sortable + 'static
+    {
+        self.parent.visit_key_sort(name, &OptionField { inner: field.clone() }, sort_key);
+    }
+}
 
-// impl<'a, V, T> BinOp<T> for OptionVisitor<'a, V>
-// where
-//     V: for<'o> BinOp<Option<&'o T>>
-// {
-//     type Result = V::Result;
-//     fn apply(&self, a: &T) -> Self::Result {
-//         self.parent.apply(Some(a))
-//     }
-// }
+#[derive(Clone)]
+struct OptionField<F> {
+    inner: F
+}
+
+impl<R, F, T> Field<Option<R>> for OptionField<F>
+where
+    F: Field<R, Value=T>
+{
+    type Value = T;
+    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &Option<R>, b: &Option<R>) -> Ordering {
+        match (a.as_ref(), b.as_ref()) {
+            (Some(a), Some(b)) => {
+                self.inner.apply_comparison(&OptionOp { parent: op }, a, b)
+            },
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal
+        }
+    }
+}
+
+struct OptionOp<'a, V> {
+    parent: &'a V
+}
+
+impl<'a, V, T> Comparison<T> for OptionOp<'a, V>
+where
+    V: Comparison<T>
+{
+    fn compare(&self, a: &T, b: &T) -> Ordering {
+        self.parent.compare(a, b)
+    }
+}
 
 pub struct SortableRecord<R> {
     sorts: BTreeMap<String, Box<dyn SorterClass<R>>>
@@ -293,22 +317,10 @@ where
     }
 }   
 
+#[derive(Clone)]
 pub struct NestedField<F,G> {
     outer: F,
     inner: G
-}
-
-impl<F,G> Clone for NestedField<F,G>
-where
-    F: Clone,
-    G: Clone
-{
-    fn clone(&self) -> Self {
-        NestedField {
-            inner: self.inner.clone(),
-            outer: self.outer.clone()
-        }
-    }
 }
 
 impl<F,G,R,T,U> Field<R> for NestedField<F,G>
