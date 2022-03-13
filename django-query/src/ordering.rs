@@ -16,29 +16,21 @@ pub enum SorterError {
     NoSort(String)
 }
 
-pub trait UnOp<T> {
-    type Result;
-    fn apply(&self, a: &T) -> Self::Result;
-}
-
-pub trait BinOp<T> {
-    type Result;
-    fn apply(&self, a: &T, b: &T) -> Self::Result;
+pub trait Comparison<T> {
+    fn compare(&self, a: &T, b: &T) -> Ordering;
 }
 
 struct Compare;
 
-impl<T: Ord> BinOp<T> for Compare {
-    type Result = Ordering;
-    fn apply(&self, a: &T, b: &T) -> Self::Result {
+impl<T: Ord> Comparison<T> for Compare {
+    fn compare(&self, a: &T, b: &T) -> Ordering {
         a.cmp(b)
     }
 }
 
 pub trait Field<R>: Clone {
     type Value;
-    fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &R) -> V::Result;
-    fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &R, b: &R) -> V::Result;
+    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering;
 }
 
 pub trait Accessor<R>: Clone {
@@ -53,11 +45,8 @@ where
     F: Accessor<R> + ReferenceField
 {
     type Value = <F as Accessor<R>>::Value;
-    fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &R) -> V::Result {
-        op.apply(self.value(a))
-    }
-    fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &R, b: &R) -> V::Result {
-        op.apply(self.value(a), self.value(b))
+    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
+        op.compare(self.value(a), self.value(b))
     }
 }
 
@@ -85,7 +74,7 @@ where
     T: Ord
 {
     fn compare(&self, a: &R, b: &R) -> Ordering {
-        self.field.apply_binop(&Compare, a, b)
+        self.field.apply_comparison(&Compare, a, b)
     }
 }
 
@@ -329,42 +318,24 @@ where
     T: 'static
 {
     type Value = U;
-    fn apply_unop<V: UnOp<Self::Value>>(&self, op: &V, a: &R) -> V::Result {
-        let n = NestedOp { inner: &self.inner, op: op };
-        self.outer.apply_unop(&n, a)
-    }
-    fn apply_binop<V: BinOp<Self::Value>>(&self, op: &V, a: &R, b: &R) -> V::Result {
-        let n = NestedOp { inner: &self.inner, op: op };
-        self.outer.apply_binop(&n, a, b)
+    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
+        let n = NestedComparison { inner: &self.inner, op: op };
+        self.outer.apply_comparison(&n, a, b)
     }
 }
 
-struct NestedOp<'a, 'b, F, P> {
+struct NestedComparison<'a, 'b, F, P> {
     inner: &'a F,
     op: &'b P
 }
 
-impl<'a,'b, F,P,T,U> UnOp<T> for NestedOp<'a, 'b, F, P>
+impl<'a,'b, F,P,T,U> Comparison<T> for NestedComparison<'a, 'b, F, P>
 where
     F: Field<T, Value=U>,
-    P: UnOp<U>
+    P: Comparison<U>
 {
-    type Result = <P as UnOp<U>>::Result;
-
-    fn apply(&self, a: &T) -> Self::Result {
-        self.inner.apply_unop(self.op, a)
-    }
-}
-
-impl<'a,'b, F,P,T,U> BinOp<T> for NestedOp<'a, 'b, F, P>
-where
-    F: Field<T, Value=U>,
-    P: BinOp<U>
-{
-    type Result = <P as BinOp<U>>::Result;
-
-    fn apply(&self, a: &T, b: &T) -> Self::Result {
-        self.inner.apply_binop(self.op, a, b)
+    fn compare(&self, a: &T, b: &T) -> Ordering {
+        self.inner.apply_comparison(self.op, a, b)
     }
 }
 
