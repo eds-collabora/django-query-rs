@@ -214,6 +214,7 @@ pub fn queryable(input: TokenStream) -> TokenStream {
             syn::parse_quote! {::django_query::operators::StartsWith},
         ),
         ("endswith", syn::parse_quote! {::django_query::operators::EndsWith}),
+        ("isnull", syn::parse_quote! {::django_query::operators::IsNull}),
     ]);
 
     let wc = generics.where_clause.as_ref();

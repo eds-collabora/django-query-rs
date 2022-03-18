@@ -27,7 +27,11 @@ where
 {
     type Base = <T as Operable>::Base;
     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
-        self.into_iter().any(|x| x.apply(op))
+        if self.is_empty() {
+            op.empty_collection()
+        } else {
+            self.into_iter().any(|x| x.apply(op))
+        }
     }
 }
 
@@ -37,7 +41,11 @@ where
 {
     type Base = <T as Operable>::Base;
     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
-        self.into_iter().any(|x| x.apply(op))
+        if let Some(x) = self {
+            x.apply(op)
+        } else {
+            op.null_option()
+        }
     }
 }
 
@@ -204,6 +212,12 @@ where
 
 pub trait Operator<T> {
     fn apply(&self, value: &T) -> bool;
+    fn empty_collection(&self) -> bool {
+        false
+    }
+    fn null_option(&self) -> bool {
+        false
+    }
 }
 
 pub trait OperatorClass<T> {

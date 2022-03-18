@@ -304,7 +304,32 @@ where
     type Instance = GreaterEqImpl<T>;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
         Ok(GreaterEqImpl {
-            target: T::from_str(rhs).map_err(|e| FilterError::Instantiation(e.into()))?,
+            target: T::from_str(rhs) .map_err(|e| FilterError::Instantiation(e.into()))?,
+        })
+    }
+}
+
+pub struct IsNullImpl {
+    target: bool
+}
+
+impl<T> Operator<T> for IsNullImpl {
+    fn apply(&self, _value: &T) -> bool {
+        !self.target
+    }
+    fn null_option(&self) -> bool {
+        self.target
+    }
+}
+
+pub struct IsNull;
+
+impl<T> OperatorClass<T> for IsNull
+{
+    type Instance = IsNullImpl;
+    fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
+        Ok(IsNullImpl {
+            target: bool::from_str(rhs).map_err(|e| FilterError::Instantiation(e.into()))?,
         })
     }
 }
