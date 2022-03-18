@@ -7,10 +7,10 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 
 use chrono::DateTime;
-use serde_json::Number;
 use serde_json::value::Value;
+use serde_json::Number;
 
-#[derive(Debug,Clone,PartialEq,Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CellValue {
     Null,
     Bool(bool),
@@ -29,7 +29,7 @@ impl StringCellValue for String {}
 
 impl<T> IntoCellValue for T
 where
-    T: StringCellValue + Display
+    T: StringCellValue + Display,
 {
     fn to_cell_value(&self) -> CellValue {
         CellValue::String(self.to_string())
@@ -98,13 +98,17 @@ impl IntoCellValue for usize {
 
 impl IntoCellValue for f32 {
     fn to_cell_value(&self) -> CellValue {
-        serde_json::Number::from_f64((*self).into()).map(CellValue::Number).unwrap_or_else(|| CellValue::Null)
+        serde_json::Number::from_f64((*self).into())
+            .map(CellValue::Number)
+            .unwrap_or_else(|| CellValue::Null)
     }
 }
 
 impl IntoCellValue for f64 {
     fn to_cell_value(&self) -> CellValue {
-        serde_json::Number::from_f64(*self).map(CellValue::Number).unwrap_or_else(|| CellValue::Null)
+        serde_json::Number::from_f64(*self)
+            .map(CellValue::Number)
+            .unwrap_or_else(|| CellValue::Null)
     }
 }
 
@@ -112,21 +116,21 @@ impl IntoCellValue for bool {
     fn to_cell_value(&self) -> CellValue {
         CellValue::Bool(*self)
     }
-}    
+}
 
 impl<T> IntoCellValue for DateTime<T>
 where
     T: chrono::TimeZone,
-    <T as chrono::TimeZone>::Offset: Display
+    <T as chrono::TimeZone>::Offset: Display,
 {
-    fn to_cell_value(&self)  -> CellValue {
+    fn to_cell_value(&self) -> CellValue {
         CellValue::String(self.to_rfc3339())
     }
 }
 
 impl<T> IntoCellValue for Option<T>
 where
-    T: IntoCellValue
+    T: IntoCellValue,
 {
     fn to_cell_value(&self) -> CellValue {
         if let Some(ref x) = self {
@@ -151,12 +155,16 @@ pub trait IntoRow {
     fn accept_column_visitor<V: ColumnVisitor>(visitor: &mut V);
 
     fn to_row(&self) -> BTreeMap<String, CellValue> {
-        let mut r = RowVisitor { values: BTreeMap::new() };
+        let mut r = RowVisitor {
+            values: BTreeMap::new(),
+        };
         self.accept_cell_visitor(&mut r);
         r.values
     }
     fn to_json(&self) -> Value {
-        let mut j = JsonVisitor { value: serde_json::map::Map::new() };
+        let mut j = JsonVisitor {
+            value: serde_json::map::Map::new(),
+        };
         self.accept_cell_visitor(&mut j);
         Value::Object(j.value)
     }
@@ -169,7 +177,7 @@ pub trait IntoRow {
 
 impl<T> IntoRow for Option<T>
 where
-    T: IntoRow
+    T: IntoRow,
 {
     fn accept_cell_visitor<V: CellVisitor>(&self, visitor: &mut V) {
         if let Some(ref item) = self {
@@ -191,10 +199,13 @@ pub trait AsForeignKey {
 
 impl<T> AsForeignKey for T
 where
-    T: IntoRow
+    T: IntoRow,
 {
     fn as_foreign_key(&self, name: &str) -> CellValue {
-        let mut k = ForeignKeyVisitor { target: name, value: None };
+        let mut k = ForeignKeyVisitor {
+            target: name,
+            value: None,
+        };
         self.accept_cell_visitor(&mut k);
         k.value.unwrap_or_else(|| CellValue::Null)
     }
@@ -202,7 +213,7 @@ where
 
 impl<T> AsForeignKey for Vec<T>
 where
-    T: AsForeignKey
+    T: AsForeignKey,
 {
     fn as_foreign_key(&self, name: &str) -> CellValue {
         let mut v = Vec::new();
@@ -215,7 +226,7 @@ where
 
 pub struct ForeignKeyVisitor<'a> {
     pub target: &'a str,
-    pub value: Option<CellValue>
+    pub value: Option<CellValue>,
 }
 
 impl<'a> CellVisitor for ForeignKeyVisitor<'a> {
@@ -227,7 +238,7 @@ impl<'a> CellVisitor for ForeignKeyVisitor<'a> {
 }
 
 struct RowVisitor {
-    pub values: BTreeMap<String, CellValue>
+    pub values: BTreeMap<String, CellValue>,
 }
 
 impl CellVisitor for RowVisitor {
@@ -243,13 +254,13 @@ impl From<CellValue> for Value {
             CellValue::Bool(b) => Value::Bool(b),
             CellValue::Number(n) => Value::Number(n),
             CellValue::String(s) => Value::String(s),
-            CellValue::Array(a) => Value::Array(a.into_iter().map(|x| x.into()).collect())
+            CellValue::Array(a) => Value::Array(a.into_iter().map(|x| x.into()).collect()),
         }
     }
 }
 
 struct JsonVisitor {
-    pub value: serde_json::map::Map<String, Value>
+    pub value: serde_json::map::Map<String, Value>,
 }
 
 impl CellVisitor for JsonVisitor {
@@ -259,7 +270,7 @@ impl CellVisitor for JsonVisitor {
 }
 
 struct ColumnListVisitor {
-    pub value: Vec<String>
+    pub value: Vec<String>,
 }
 
 impl ColumnVisitor for ColumnListVisitor {
@@ -269,12 +280,12 @@ impl ColumnVisitor for ColumnListVisitor {
 }
 
 struct NullColumnVisitor<'a, V> {
-    parent: &'a mut V
+    parent: &'a mut V,
 }
 
 impl<'a, V> ColumnVisitor for NullColumnVisitor<'a, V>
 where
-    V: CellVisitor
+    V: CellVisitor,
 {
     fn visit_column(&mut self, name: &str) {
         self.parent.visit_value(name, CellValue::Null);

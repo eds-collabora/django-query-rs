@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use crate::filtering::{FilterError, Operator, OperatorClass, Operable};
+use crate::filtering::{FilterError, Operable, Operator, OperatorClass};
 
 pub trait Scalar {}
 
@@ -16,17 +16,17 @@ impl Scalar for u64 {}
 impl Scalar for bool {}
 impl Scalar for String {}
 
-impl<T: chrono::TimeZone> Scalar for chrono::DateTime<T> { }
+impl<T: chrono::TimeZone> Scalar for chrono::DateTime<T> {}
 
 impl<T> Operable for T
 where
-    T: Scalar
+    T: Scalar,
 {
     type Base = Self;
     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool {
         op.apply(self)
     }
-}    
+}
 
 pub struct EqImpl<T> {
     target: T,
@@ -45,7 +45,7 @@ pub struct Eq;
 impl<T> OperatorClass<T> for Eq
 where
     T: core::cmp::Eq + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = EqImpl<T>;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -61,7 +61,7 @@ pub struct InImpl<T> {
 
 impl<T> Operator<T> for InImpl<T>
 where
-    T: core::cmp::Eq + FromStr
+    T: core::cmp::Eq + FromStr,
 {
     fn apply(&self, value: &T) -> bool {
         self.targets.contains(value)
@@ -73,7 +73,7 @@ pub struct In;
 impl<T> OperatorClass<T> for In
 where
     T: core::cmp::Eq + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = InImpl<T>;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -103,7 +103,7 @@ pub struct Contains;
 impl<T> OperatorClass<T> for Contains
 where
     T: Display + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = ContainsImpl;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -131,7 +131,7 @@ pub struct IContains;
 impl<T> OperatorClass<T> for IContains
 where
     T: Display + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = IContainsImpl;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -159,7 +159,7 @@ pub struct StartsWith;
 impl<T> OperatorClass<T> for StartsWith
 where
     T: Display + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = StartsWithImpl;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -175,7 +175,7 @@ pub struct EndsWithImpl {
 
 impl<T> Operator<T> for EndsWithImpl
 where
-    T: Display
+    T: Display,
 {
     fn apply(&self, value: &T) -> bool {
         value.to_string().ends_with(&self.target)
@@ -187,7 +187,7 @@ pub struct EndsWith;
 impl<T> OperatorClass<T> for EndsWith
 where
     T: Display + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = EndsWithImpl;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -215,7 +215,7 @@ pub struct Less;
 impl<T> OperatorClass<T> for Less
 where
     T: Ord + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = LessImpl<T>;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -243,7 +243,7 @@ pub struct Greater;
 impl<T> OperatorClass<T> for Greater
 where
     T: Ord + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = GreaterImpl<T>;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -271,7 +271,7 @@ pub struct LessEq;
 impl<T> OperatorClass<T> for LessEq
 where
     T: Ord + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = LessEqImpl<T>;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
@@ -299,18 +299,18 @@ pub struct GreaterEq;
 impl<T> OperatorClass<T> for GreaterEq
 where
     T: Ord + FromStr,
-    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     type Instance = GreaterEqImpl<T>;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
         Ok(GreaterEqImpl {
-            target: T::from_str(rhs) .map_err(|e| FilterError::Instantiation(e.into()))?,
+            target: T::from_str(rhs).map_err(|e| FilterError::Instantiation(e.into()))?,
         })
     }
 }
 
 pub struct IsNullImpl {
-    target: bool
+    target: bool,
 }
 
 impl<T> Operator<T> for IsNullImpl {
@@ -324,8 +324,7 @@ impl<T> Operator<T> for IsNullImpl {
 
 pub struct IsNull;
 
-impl<T> OperatorClass<T> for IsNull
-{
+impl<T> OperatorClass<T> for IsNull {
     type Instance = IsNullImpl;
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
         Ok(IsNullImpl {

@@ -294,8 +294,8 @@ fn test_deeper_nesting() {
                 string_field: "c".to_string(),
                 int_field: 4,
             },
-           int_field: 4,
-           string_field: "b".to_string(),
+            int_field: 4,
+            string_field: "b".to_string(),
         },
     ];
 
@@ -328,7 +328,7 @@ fn test_deeper_nesting() {
     assert_eq!(v[1].int_field, 1);
     assert_eq!(v[2].int_field, 4);
     assert_eq!(v[3].int_field, 3);
-    
+
     let sort = sr.create_sort("foo").unwrap();
     sort.sort_vec(&mut v);
     assert_eq!(v[0].int_field, 3);
@@ -369,7 +369,6 @@ struct MyRecord4 {
     #[django(sort)]
     string_field: String,
 }
-
 
 #[test]
 fn test_macro() {
@@ -431,8 +430,8 @@ fn test_macro() {
                 string_field: "c".to_string(),
                 int_field: 4,
             },
-           int_field: 4,
-           string_field: "b".to_string(),
+            int_field: 4,
+            string_field: "b".to_string(),
         },
     ];
 
@@ -465,7 +464,7 @@ fn test_macro() {
     assert_eq!(v[1].int_field, 1);
     assert_eq!(v[2].int_field, 4);
     assert_eq!(v[3].int_field, 3);
-    
+
     let sort = sr.create_sort("foo").unwrap();
     sort.sort_vec(&mut v);
     assert_eq!(v[0].int_field, 3);
@@ -497,21 +496,21 @@ fn test_macro() {
 
 #[derive(Sortable)]
 struct MyRecord6 {
-    #[django(rename="foot", sort("string_field"))]
+    #[django(rename = "foot", sort("string_field"))]
     foo: MyRecord,
-    #[django(rename="i32", sort)]
+    #[django(rename = "i32", sort)]
     int_field: i32,
 }
 
 #[derive(Sortable)]
 struct MyRecord5 {
-    #[django(rename="barbar", sort("foot"))]
+    #[django(rename = "barbar", sort("foot"))]
     bar: MyRecord6,
-    #[django(rename="womble", sort("int_field"))]
+    #[django(rename = "womble", sort("int_field"))]
     foo: MyRecord,
-    #[django(rename="int", sort)]
+    #[django(rename = "int", sort)]
     int_field: i32,
-    #[django(rename="str", sort)]
+    #[django(rename = "str", sort)]
     string_field: String,
 }
 
@@ -575,8 +574,8 @@ fn test_rename() {
                 string_field: "c".to_string(),
                 int_field: 4,
             },
-           int_field: 4,
-           string_field: "b".to_string(),
+            int_field: 4,
+            string_field: "b".to_string(),
         },
     ];
 
@@ -609,7 +608,7 @@ fn test_rename() {
     assert_eq!(v[1].int_field, 1);
     assert_eq!(v[2].int_field, 4);
     assert_eq!(v[3].int_field, 3);
-    
+
     let sort = sr.create_sort("womble").unwrap();
     sort.sort_vec(&mut v);
     assert_eq!(v[0].int_field, 3);

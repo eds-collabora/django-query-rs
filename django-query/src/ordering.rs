@@ -13,7 +13,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum SorterError {
     #[error("cannot sort by expression '{0}'")]
-    NoSort(String)
+    NoSort(String),
 }
 
 pub trait Comparison<T> {
@@ -42,7 +42,7 @@ pub trait ReferenceField {}
 
 impl<R, F> Field<R> for F
 where
-    F: Accessor<R> + ReferenceField
+    F: Accessor<R> + ReferenceField,
 {
     type Value = <F as Accessor<R>>::Value;
     fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
@@ -52,14 +52,14 @@ where
 
 pub trait Sorter<R> {
     fn compare(&self, a: &R, b: &R) -> Ordering;
-    
+
     fn sort_vec(&self, vec: &mut Vec<R>) {
-        vec.sort_by(|x,y| self.compare(x,y))
+        vec.sort_by(|x, y| self.compare(x, y))
     }
 }
 
 pub struct SorterImpl<F> {
-    field: F
+    field: F,
 }
 
 impl<F> SorterImpl<F> {
@@ -68,10 +68,10 @@ impl<F> SorterImpl<F> {
     }
 }
 
-impl<R,F,T> Sorter<R> for SorterImpl<F>
+impl<R, F, T> Sorter<R> for SorterImpl<F>
 where
-    F: Field<R, Value=T>,
-    T: Ord
+    F: Field<R, Value = T>,
+    T: Ord,
 {
     fn compare(&self, a: &R, b: &R) -> Ordering {
         self.field.apply_comparison(&Compare, a, b)
@@ -79,7 +79,7 @@ where
 }
 
 pub struct Reverser<S> {
-    inner: S
+    inner: S,
 }
 
 impl<S> Reverser<S> {
@@ -88,12 +88,12 @@ impl<S> Reverser<S> {
     }
 }
 
-impl<R,S> Sorter<R> for Reverser<S>
+impl<R, S> Sorter<R> for Reverser<S>
 where
-    S: Sorter<R>
+    S: Sorter<R>,
 {
     fn compare(&self, a: &R, b: &R) -> Ordering {
-        self.inner.compare(a,b).reverse()
+        self.inner.compare(a, b).reverse()
     }
 }
 
@@ -102,7 +102,7 @@ pub trait SorterClass<R> {
 }
 
 pub struct SorterClassImpl<F> {
-    field: F
+    field: F,
 }
 
 impl<F> SorterClassImpl<F> {
@@ -111,16 +111,16 @@ impl<F> SorterClassImpl<F> {
     }
 }
 
-impl<R,F,T> SorterClass<R> for SorterClassImpl<F>
+impl<R, F, T> SorterClass<R> for SorterClassImpl<F>
 where
-    F: Field<R, Value=T> + 'static,
-    T: Ord
+    F: Field<R, Value = T> + 'static,
+    T: Ord,
 {
     fn instantiate(&self, reverse: bool) -> Box<dyn Sorter<R>> {
         if reverse {
-            Box::new( Reverser::new(SorterImpl::new(self.field.clone())) )
+            Box::new(Reverser::new(SorterImpl::new(self.field.clone())))
         } else {
-            Box::new( SorterImpl::new(self.field.clone()) )
+            Box::new(SorterImpl::new(self.field.clone()))
         }
     }
 }
@@ -128,83 +128,102 @@ where
 pub trait SortVisitor<R> {
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
-        F: Field<R, Value=T> + 'static,
+        F: Field<R, Value = T> + 'static,
         T: Ord;
 
     fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, sort_key: &str)
     where
-        F: Field<R, Value=T> + 'static,
+        F: Field<R, Value = T> + 'static,
         T: Sortable + 'static;
 }
 
 pub trait Sortable {
-    fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V) where Self: Sized;
+    fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V)
+    where
+        Self: Sized;
 }
 
 impl<T> Sortable for Option<T>
 where
-    T: Sortable
+    T: Sortable,
 {
-    fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V) where Self: Sized {
+    fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V)
+    where
+        Self: Sized,
+    {
         let mut v = OptionVisitor { parent: visitor };
         T::accept_visitor(&mut v);
     }
 }
 
 struct OptionVisitor<'a, P> {
-    parent: &'a mut P
+    parent: &'a mut P,
 }
 
 impl<'a, P, R> SortVisitor<R> for OptionVisitor<'a, P>
 where
-    P: SortVisitor<Option<R>>
+    P: SortVisitor<Option<R>>,
 {
-    fn visit_sort<F,T>(&mut self, name: &str, field: &F)
+    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
-        F: Field<R, Value=T> + 'static,
-        T: Ord
+        F: Field<R, Value = T> + 'static,
+        T: Ord,
     {
-        self.parent.visit_sort(name, &OptionField { inner: field.clone() });
+        self.parent.visit_sort(
+            name,
+            &OptionField {
+                inner: field.clone(),
+            },
+        );
     }
 
-    fn visit_key_sort<F,T>(&mut self, name: &str, field: &F, sort_key: &str)
+    fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, sort_key: &str)
     where
-        F: Field<R, Value=T> + 'static,
-        T: Sortable + 'static
+        F: Field<R, Value = T> + 'static,
+        T: Sortable + 'static,
     {
-        self.parent.visit_key_sort(name, &OptionField { inner: field.clone() }, sort_key);
+        self.parent.visit_key_sort(
+            name,
+            &OptionField {
+                inner: field.clone(),
+            },
+            sort_key,
+        );
     }
 }
 
 #[derive(Clone)]
 struct OptionField<F> {
-    inner: F
+    inner: F,
 }
 
 impl<R, F, T> Field<Option<R>> for OptionField<F>
 where
-    F: Field<R, Value=T>
+    F: Field<R, Value = T>,
 {
     type Value = T;
-    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &Option<R>, b: &Option<R>) -> Ordering {
+    fn apply_comparison<V: Comparison<Self::Value>>(
+        &self,
+        op: &V,
+        a: &Option<R>,
+        b: &Option<R>,
+    ) -> Ordering {
         match (a.as_ref(), b.as_ref()) {
-            (Some(a), Some(b)) => {
-                self.inner.apply_comparison(&OptionOp { parent: op }, a, b)
-            },
+            (Some(a), Some(b)) => self.inner.apply_comparison(&OptionOp { parent: op }, a, b),
             (Some(_), None) => Ordering::Greater,
             (None, Some(_)) => Ordering::Less,
-            (None, None) => Ordering::Equal
+            (None, None) => Ordering::Equal,
         }
     }
 }
 
 struct OptionOp<'a, V> {
-    parent: &'a V
+    parent: &'a V,
 }
 
 impl<'a, V, T> Comparison<T> for OptionOp<'a, V>
 where
-    V: Comparison<T>
+    V: Comparison<T>,
 {
     fn compare(&self, a: &T, b: &T) -> Ordering {
         self.parent.compare(a, b)
@@ -212,13 +231,13 @@ where
 }
 
 pub struct SortableRecord<R> {
-    sorts: BTreeMap<String, Box<dyn SorterClass<R>>>
+    sorts: BTreeMap<String, Box<dyn SorterClass<R>>>,
 }
 
 impl<R: Sortable + 'static> SortableRecord<R> {
     pub fn new() -> Self {
         let mut res = Self {
-            sorts: BTreeMap::new()
+            sorts: BTreeMap::new(),
         };
         R::accept_visitor(&mut res);
         res
@@ -253,16 +272,19 @@ impl<R: Sortable + 'static> SortableRecord<R> {
 impl<R: Sortable> SortVisitor<R> for SortableRecord<R> {
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
-        F: Field<R, Value=T> + 'static,
-        T: Ord
+        F: Field<R, Value = T> + 'static,
+        T: Ord,
     {
-        self.sorts.insert(name.to_string(), Box::new( SorterClassImpl::new(field.clone()) ));
+        self.sorts.insert(
+            name.to_string(),
+            Box::new(SorterClassImpl::new(field.clone())),
+        );
     }
 
     fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, key: &str)
     where
-        F: Field<R, Value=T> + 'static,
-        T: Sortable + 'static
+        F: Field<R, Value = T> + 'static,
+        T: Sortable + 'static,
     {
         let mut v = KeyVisitor {
             name: name,
@@ -286,65 +308,77 @@ struct KeyVisitor<'a, 'b, P, F, S> {
 impl<'a, 'b, P, G, R, S> SortVisitor<R> for KeyVisitor<'a, 'b, P, G, S>
 where
     P: SortVisitor<S>,
-    G: Field<S, Value=R> + 'static,
-    R: 'static
+    G: Field<S, Value = R> + 'static,
+    R: 'static,
 {
-    fn visit_sort<F,T>(&mut self, name: &str, field: &F)
+    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
-        F: Field<R,Value=T> + 'static,
-        T: Ord
+        F: Field<R, Value = T> + 'static,
+        T: Ord,
     {
         if name == self.key {
-            self.parent.visit_sort(self.name, &NestedField { outer: self.field.clone(), inner: field.clone() });
+            self.parent.visit_sort(
+                self.name,
+                &NestedField {
+                    outer: self.field.clone(),
+                    inner: field.clone(),
+                },
+            );
         }
     }
 
-    fn visit_key_sort<F,T>(&mut self, name: &str, field: &F, key: &str)
+    fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, key: &str)
     where
-        F: Field<R, Value=T> + 'static,
-        T: Sortable + 'static
+        F: Field<R, Value = T> + 'static,
+        T: Sortable + 'static,
     {
         if name == self.key {
             let mut v = KeyVisitor {
                 name: self.name,
                 key: key,
-                field: NestedField { outer: self.field.clone(), inner: field.clone() },
+                field: NestedField {
+                    outer: self.field.clone(),
+                    inner: field.clone(),
+                },
                 parent: self.parent,
                 _marker: Default::default(),
             };
             T::accept_visitor(&mut v);
         }
     }
-}   
-
-#[derive(Clone)]
-pub struct NestedField<F,G> {
-    outer: F,
-    inner: G
 }
 
-impl<F,G,R,T,U> Field<R> for NestedField<F,G>
+#[derive(Clone)]
+pub struct NestedField<F, G> {
+    outer: F,
+    inner: G,
+}
+
+impl<F, G, R, T, U> Field<R> for NestedField<F, G>
 where
-    F: Field<R,Value=T>,
-    G: Field<T,Value=U>,
-    T: 'static
+    F: Field<R, Value = T>,
+    G: Field<T, Value = U>,
+    T: 'static,
 {
     type Value = U;
     fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
-        let n = NestedComparison { inner: &self.inner, op: op };
+        let n = NestedComparison {
+            inner: &self.inner,
+            op: op,
+        };
         self.outer.apply_comparison(&n, a, b)
     }
 }
 
 struct NestedComparison<'a, 'b, F, P> {
     inner: &'a F,
-    op: &'b P
+    op: &'b P,
 }
 
-impl<'a,'b, F,P,T,U> Comparison<T> for NestedComparison<'a, 'b, F, P>
+impl<'a, 'b, F, P, T, U> Comparison<T> for NestedComparison<'a, 'b, F, P>
 where
-    F: Field<T, Value=U>,
-    P: Comparison<U>
+    F: Field<T, Value = U>,
+    P: Comparison<U>,
 {
     fn compare(&self, a: &T, b: &T) -> Ordering {
         self.inner.apply_comparison(self.op, a, b)
@@ -353,7 +387,7 @@ where
 
 pub struct StackedSorter<R> {
     primary: Box<dyn Sorter<R>>,
-    secondary: Box<dyn Sorter<R>>
+    secondary: Box<dyn Sorter<R>>,
 }
 
 impl<R> StackedSorter<R> {
@@ -362,13 +396,12 @@ impl<R> StackedSorter<R> {
     }
 }
 
-impl<R> Sorter<R> for StackedSorter<R>
-{
+impl<R> Sorter<R> for StackedSorter<R> {
     fn compare(&self, a: &R, b: &R) -> Ordering {
         match self.primary.compare(a, b) {
             Ordering::Less => Ordering::Less,
             Ordering::Greater => Ordering::Greater,
-            Ordering::Equal => self.secondary.compare(a, b)
+            Ordering::Equal => self.secondary.compare(a, b),
         }
     }
 }

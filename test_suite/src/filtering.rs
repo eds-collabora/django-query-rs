@@ -2,8 +2,8 @@
 use std::fmt::Debug;
 use std::str::FromStr;
 
-use django_query::*;
 use django_query::filtering::*;
+use django_query::*;
 
 // struct MyRecord<T> {
 //     string_field: String,

@@ -55,13 +55,9 @@ impl syn::parse::Parse for DjangoItem {
                 let _: syn::Token![=] = input.parse()?;
                 let fun = input.call(syn::Path::parse_mod_style)?;
                 Ok(DjangoItem::DefaultOperator2(fun))
-            },
-            "exclude" => {
-                Ok(DjangoItem::Ignored)
-            },
-            "traverse" => {
-                Ok(DjangoItem::Traversed)
-            },
+            }
+            "exclude" => Ok(DjangoItem::Ignored),
+            "traverse" => Ok(DjangoItem::Traversed),
             "op" => {
                 // op(in = MyInOperatorClass)
                 let content;
@@ -70,7 +66,7 @@ impl syn::parse::Parse for DjangoItem {
                 Ok(DjangoItem::Operators(punc.into_iter().collect()))
             }
             "sort" => {
-                if input.lookahead1().peek(syn::token::Paren) { 
+                if input.lookahead1().peek(syn::token::Paren) {
                     let content;
                     let _: syn::token::Paren = syn::parenthesized!(content in input);
                     let item = content.parse()?;
@@ -78,12 +74,12 @@ impl syn::parse::Parse for DjangoItem {
                 } else {
                     Ok(DjangoItem::Sort(None))
                 }
-            },
+            }
             "foreign_key" => {
                 let _: syn::Token![=] = input.parse()?;
                 let key = input.parse()?;
                 Ok(DjangoItem::ForeignKey(key))
-            },
+            }
             _ => Err(syn::Error::new_spanned(
                 attr,
                 "unsupported django attribute",
@@ -98,7 +94,7 @@ enum DjangoFiltering {
         default_operator: (Option<syn::Ident>, Option<syn::Path>),
         operators: BTreeMap<String, Option<syn::Path>>,
     },
-    Traversed, 
+    Traversed,
     Excluded,
 }
 
@@ -106,7 +102,7 @@ enum DjangoFiltering {
 enum DjangoCell {
     Scalar,
     ForeignRow(syn::LitStr),
-    Excluded
+    Excluded,
 }
 
 #[derive(Debug)]
@@ -128,12 +124,12 @@ impl syn::parse::Parse for DjangoMeta {
             syn::punctuated::Punctuated::<DjangoItem, syn::Token![,]>::parse_terminated(input)?;
         let mut sort = None;
         let mut foreign_key = None;
-        
+
         for item in punc {
             match item {
                 DjangoItem::Rename(new_name) => {
                     field_name = Some(new_name);
-                },
+                }
                 DjangoItem::Operators(ops) => {
                     for op in ops {
                         match op {
@@ -145,25 +141,21 @@ impl syn::parse::Parse for DjangoMeta {
                             }
                         }
                     }
-                },
+                }
                 DjangoItem::DefaultOperator2(fun) => {
                     defop = (None, Some(fun));
-                },
+                }
                 DjangoItem::DefaultOperator1(op) => {
                     defop = (Some(op), None);
-                },
+                }
                 DjangoItem::Ignored => {
                     excluded = true;
                 }
                 DjangoItem::Traversed => {
                     traversed = true;
-                },
-                DjangoItem::Sort(key) => {
-                    sort = Some(key)
-                },
-                DjangoItem::ForeignKey(key) => {
-                    foreign_key = Some(key)
                 }
+                DjangoItem::Sort(key) => sort = Some(key),
+                DjangoItem::ForeignKey(key) => foreign_key = Some(key),
             }
         }
         let filtering = if excluded {
@@ -173,7 +165,7 @@ impl syn::parse::Parse for DjangoMeta {
         } else {
             DjangoFiltering::Included {
                 default_operator: defop,
-                operators
+                operators,
             }
         };
         let cell = if excluded {
@@ -184,7 +176,12 @@ impl syn::parse::Parse for DjangoMeta {
             DjangoCell::Scalar
         };
 
-        Ok( Self { filtering, sort, cell, name: field_name } )
+        Ok(Self {
+            filtering,
+            sort,
+            cell,
+            name: field_name,
+        })
     }
 }
 
@@ -196,7 +193,7 @@ pub fn queryable(input: TokenStream) -> TokenStream {
         generics,
         ..
     } = syn::parse_macro_input!(input);
-    
+
     let mut body = pm2::TokenStream::new();
     let mut structs = pm2::TokenStream::new();
 
@@ -206,15 +203,30 @@ pub fn queryable(input: TokenStream) -> TokenStream {
         ("lt", syn::parse_quote! {::django_query::operators::Less}),
         ("lte", syn::parse_quote! {::django_query::operators::LessEq}),
         ("gt", syn::parse_quote! {::django_query::operators::Greater}),
-        ("gte", syn::parse_quote! {::django_query::operators::GreaterEq}),
-        ("contains", syn::parse_quote! {::django_query::operators::Contains}),
-        ("icontains", syn::parse_quote! {::django_query::operators::IContains}),
+        (
+            "gte",
+            syn::parse_quote! {::django_query::operators::GreaterEq},
+        ),
+        (
+            "contains",
+            syn::parse_quote! {::django_query::operators::Contains},
+        ),
+        (
+            "icontains",
+            syn::parse_quote! {::django_query::operators::IContains},
+        ),
         (
             "startswith",
             syn::parse_quote! {::django_query::operators::StartsWith},
         ),
-        ("endswith", syn::parse_quote! {::django_query::operators::EndsWith}),
-        ("isnull", syn::parse_quote! {::django_query::operators::IsNull}),
+        (
+            "endswith",
+            syn::parse_quote! {::django_query::operators::EndsWith},
+        ),
+        (
+            "isnull",
+            syn::parse_quote! {::django_query::operators::IsNull},
+        ),
     ]);
 
     let wc = generics.where_clause.as_ref();
@@ -228,12 +240,17 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                 let mut defop = None;
                 let mut excluded = false;
                 let mut traversed = false;
-                
+
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        let parsed = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute");
+                        let parsed = attr
+                            .parse_args::<DjangoMeta>()
+                            .expect("failed to parse django attribute");
                         match parsed.filtering {
-                            DjangoFiltering::Included { default_operator, operators: djoperators } => {
+                            DjangoFiltering::Included {
+                                default_operator,
+                                operators: djoperators,
+                            } => {
                                 for (key, value) in djoperators {
                                     if let Some(value) = value {
                                         operators.insert(key, value);
@@ -251,18 +268,18 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                                                 .get(op.to_string().as_str())
                                                 .unwrap()
                                                 .clone(),
-                                            )
+                                        )
                                     }
                                     (None, Some(fun)) => defop = Some(fun),
                                     _ => {}
                                 }
-                            },
+                            }
                             DjangoFiltering::Traversed => {
                                 traversed = true;
-                            },
+                            }
                             DjangoFiltering::Excluded => {
                                 excluded = true;
-                            },
+                            }
                         };
                         if let Some(name) = parsed.name {
                             fieldname = name;
@@ -272,7 +289,7 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                 if excluded {
                     continue;
                 }
-                
+
                 let fieldtype = &field.ty;
                 let structname =
                     syn::Ident::new(&format!("{}Field", fieldid), pm2::Span::call_site());
@@ -308,7 +325,7 @@ pub fn queryable(input: TokenStream) -> TokenStream {
                             type Value = #fieldtype;
                             fn apply<O: ::django_query::filtering::Operator<<Self::Value as ::django_query::filtering::Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
                                 <Self::Value as ::django_query::filtering::Operable>::apply(&data.#fieldid, op)
-                            }  
+                            }
                             fn accept_visitor<V: ::django_query::filtering::MemberVisitor<Self, #ident #generics, <Self as ::django_query::filtering::Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
                                 #fieldbody
                             }
@@ -370,7 +387,7 @@ pub fn sortable(input: TokenStream) -> TokenStream {
 
     let mut body = pm2::TokenStream::new();
     let mut structs = pm2::TokenStream::new();
-    
+
     let wc = generics.where_clause.as_ref();
 
     if let syn::Data::Struct(s) = data {
@@ -379,10 +396,12 @@ pub fn sortable(input: TokenStream) -> TokenStream {
                 let fieldid = field.ident.as_ref().unwrap();
                 let mut fieldname = syn::LitStr::new(&fieldid.to_string(), fieldid.span());
                 let mut sort = None;
-                
+
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        let parsed = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute");
+                        let parsed = attr
+                            .parse_args::<DjangoMeta>()
+                            .expect("failed to parse django attribute");
                         if let Some(name) = parsed.name {
                             fieldname = name;
                         }
@@ -457,7 +476,7 @@ pub fn into_row(input: TokenStream) -> TokenStream {
 
     let mut cells = pm2::TokenStream::new();
     let mut cols = pm2::TokenStream::new();
-    
+
     let wc = generics.where_clause.as_ref();
 
     if let syn::Data::Struct(s) = data {
@@ -469,18 +488,19 @@ pub fn into_row(input: TokenStream) -> TokenStream {
 
                 let mut excluded = false;
                 let mut key = None;
-                
+
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        let parsed = attr.parse_args::<DjangoMeta>().expect("failed to parse django attribute");
+                        let parsed = attr
+                            .parse_args::<DjangoMeta>()
+                            .expect("failed to parse django attribute");
                         let cell = parsed.cell;
                         match cell {
-                            DjangoCell::Excluded => { excluded = true; },
-                            DjangoCell::ForeignRow(fkey) => {
-                                key = Some(fkey)
-                            },
-                            DjangoCell::Scalar => {
+                            DjangoCell::Excluded => {
+                                excluded = true;
                             }
+                            DjangoCell::ForeignRow(fkey) => key = Some(fkey),
+                            DjangoCell::Scalar => {}
                         }
                         if let Some(name) = parsed.name {
                             fieldname = name;
@@ -509,7 +529,6 @@ pub fn into_row(input: TokenStream) -> TokenStream {
         panic!("IntoRow can only be derived for structs with named fields.");
     }
 
-    
     let res: TokenStream = quote::quote! {
         const _: () = {
             #[automatically_derived]
@@ -529,4 +548,3 @@ pub fn into_row(input: TokenStream) -> TokenStream {
 
     res
 }
-
