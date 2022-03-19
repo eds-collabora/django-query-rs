@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-//use std::str::FromStr;
 
 use thiserror::Error;
 
@@ -16,8 +15,14 @@ pub enum FilterError {
     Instantiation(#[from] anyhow::Error),
 }
 
+/// Django querying operates (mostly) on simple values, like strings
+/// and numbers, while fields as stored may have more complex types
+/// like `Vec<T>` and `Option<T>`. The `Operable` trait enables us to
+/// describe how to apply operators to a given complex type.
 pub trait Operable {
-    type Base: Operable;
+    /// The simple underlying type.
+    type Base;
+    /// Apply `op` across our contents.
     fn apply<O: Operator<Self::Base>>(&self, op: &O) -> bool;
 }
 
@@ -49,21 +54,53 @@ where
     }
 }
 
+/// A `Field` allows us to apply an `Operator` to one field of a
+/// structure. You will normally generate implementations of `Field`
+/// using the `Queryable` derive macro for your type. The key
+/// use of `Field` is in traversing nested structures: whereas a `Member`
+/// represents applying an operator to an `Operable` `Value`, the `Value`
+/// of a `Field` can be arbitrary, and is often a structured type.
 pub trait Field<R>: Clone {
+    /// The type an operator on this field must accept.
     type Value;
+    /// Apply `op` to a particular field of `data`, and return the
+    /// result.
     fn apply<O: Operator<Self::Value>>(&self, op: &O, data: &R) -> bool;
 }
 
+/// A `Member` is an exposed field of a structure. You will normally
+/// generate implementations of `Member` using the `Queryable` derive
+/// macro for your type. Whereas `Field` is just about access for
+/// mechanical reasons (nesting), a `Member` is visible in queries,
+/// and will expose a list of supported query operators to a
+/// `MemberVisitor`.
 pub trait Member<R>: Clone {
+    /// The type of the member's data, which must be `Operable` so
+    /// that Django filtering queries (which are defined on simple
+    /// types) can be made against it.
     type Value: Operable;
+    /// Apply an operator to the given field of `data`, returning the
+    /// result.
     fn apply<O: Operator<<Self::Value as Operable>::Base>>(&self, op: &O, data: &R) -> bool;
+    /// `visitor` will be called with each of the supported operator
+    /// classes for this member. This is used to build up a list
+    /// of supported queries in a `QueryableRecord`.
     fn accept_visitor<V: MemberVisitor<Self, R, Self::Value>>(&self, visitor: &mut V);
 }
 
+/// A `MemberVisitor` can be passed to `Member::accept_visitor` to
+/// receive a callback for each of the operator classes a given
+/// `Member` supports.
 pub trait MemberVisitor<F, R, T>
 where
     F: Member<R, Value = T> + Clone,
 {
+    /// This is called by `Member` for each of the operator classes it
+    /// supports. Here:
+    /// - `name` is the name of the operator in queries (e.g. "in")
+    /// - `f` is the calling `Member` itself.
+    /// - `op` is an `OperatorClass` with a target type matching the
+    ///   `Member`.
     fn visit_operator<O>(&mut self, name: &str, f: &F, op: O)
     where
         F: 'static,
@@ -72,20 +109,44 @@ where
         T: Operable;
 }
 
+/// A `Record` is a representation of an exposed structure, simiar to
+/// `Member`, but now for structured types. When a type is `Queryable`
+/// it can produce a `Record` for itself, to enable discovery of its
+/// available members and their supported operators.
 pub trait Record<R> {
+    /// `visitor` will be called for each exposed member of the type.
     fn accept_visitor<V: RecordVisitor<R>>(&self, visitor: &mut V)
     where
         Self: Sized;
 }
 
+/// A `RecordVisitor` can be passed to `Record::accept_visitor` to
+/// receive a callback for each of the exposed members of a type.
 pub trait RecordVisitor<R> {
-    fn visit_member<F, O, T>(&mut self, name: &str, field: &F, defop: O)
+    /// This should be called by `Record` for each exposed structure
+    /// field which is `Operable`. Here:
+    /// - `name` is the name of the field, as exposed.
+    /// - `member` is the `Member` for that field.
+    /// - `defop` is the default `OperatorClass` for that field, which
+    ///    should be applied when no operator is specified (i.e. in
+    ///    the `"record__field"` case as opposed to the
+    ///    `"record__field__op"` case)
+    fn visit_member<F, O, T>(&mut self, name: &str, member: &F, defop: O)
     where
         F: Member<R, Value = T> + Clone + 'static,
         O: OperatorClass<<T as Operable>::Base> + 'static,
         <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
         T: Operable;
 
+    /// This should be called by `Record` for each exposed structure field
+    /// which can be traversed, that is where the type of the field is itself
+    /// a structured type, for example when modelling foreign keys. Here:
+    /// - `name` is the name of the field, as exposed.
+    /// - `field` is the `Field` for that field (note the difference:
+    ///    there are no exposed operators for a Field, and operators
+    ///    are applied to the record type, since there could be no one
+    ///    Operable::Base type.
+    /// - `inner_record` is the `Record` for the field.
     fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
     where
         F: Field<R, Value = U> + Clone + 'static,

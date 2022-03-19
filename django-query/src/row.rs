@@ -1,8 +1,3 @@
-/*
-Representation of output data. Foreign key handling is the main reason
-you want this.
- */
-
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
