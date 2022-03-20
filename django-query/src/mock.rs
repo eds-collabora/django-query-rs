@@ -2,6 +2,7 @@
 
 use core::cmp::{max, min, Ordering};
 use core::fmt::Debug;
+use core::ops::Deref;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
@@ -209,22 +210,23 @@ impl<T: Clone> RowSource for Vec<T> {
 // }
 
 pub struct Endpoint<T> {
-    rows: T
+    row_source: T
 }
 
-impl<T, R> Endpoint<T>
+impl<T, R, U> Endpoint<T>
 where
     T: Send + Sync + RowSource<Item=R>,
     R: Queryable + Sortable + Debug + 'static,
-    for<'a> &'a <T as RowSource>::Rows: IntoIterator<Item=&'a R>,
+    <T as RowSource>::Rows: Deref<Target=U>,
+    for<'a> &'a U: IntoIterator<Item=&'a R>,
 {
-    pub fn new(rows: T) -> Self {
-        Self { rows }
+    pub fn new(row_source: T) -> Self {
+        Self { row_source }
     }
 
     fn parse_query<'a>(
         url: &Url,
-        iter: <&'a <T as RowSource>::Rows as IntoIterator>::IntoIter,
+        iter: <&'a <<T as RowSource>::Rows as Deref>::Target as IntoIterator>::IntoIter,
     ) -> Result<ResponseSet<&'a R>, MockError> {
         let mut rb = ResponseSetBuilder::new();
         let qr = QueryableRecord::<R>::new();
@@ -264,14 +266,15 @@ where
     
 }
 
-impl<T, R> Respond for Endpoint<T>
+impl<T, R, U> Respond for Endpoint<T>
 where
     T: Send + Sync + RowSource<Item = R>,
     R: Queryable + Sortable + IntoRow + Debug + 'static,
-    for<'a> &'a <T as RowSource>::Rows: IntoIterator<Item=&'a R>,
+    <T as RowSource>::Rows: Deref<Target=U>,
+    for<'a> &'a U: IntoIterator<Item=&'a R>,
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
-        let data: <T as RowSource>::Rows = self.rows.get();
+        let data: <T as RowSource>::Rows = self.row_source.get();
         let body = Self::parse_query(&request.url, (&data).into_iter());
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
