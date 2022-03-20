@@ -245,7 +245,6 @@ impl<R: Sortable + 'static> SortableRecord<R> {
 
     pub fn create_sort(&self, expr: &str) -> Result<Box<dyn Sorter<R>>, SorterError> {
         let parts = expr.split(',').collect::<Vec<&str>>();
-        println!("Got parts: {:?}", parts);
         let mut full_sort: Option<Box<dyn Sorter<R>>> = None;
         for part in parts.iter().rev() {
             let part_sort = if part.starts_with('-') {
@@ -347,7 +346,6 @@ where
         }
     }
 }
-
 #[derive(Clone)]
 pub struct NestedField<F, G> {
     outer: F,
@@ -404,4 +402,5 @@ impl<R> Sorter<R> for StackedSorter<R> {
             Ordering::Equal => self.secondary.compare(a, b),
         }
     }
+
 }
