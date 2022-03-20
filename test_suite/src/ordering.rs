@@ -28,7 +28,7 @@ impl ordering::Accessor<MyRecord> for IntField {
 impl ordering::ReferenceField for IntField {}
 
 impl ordering::Sortable for MyRecord {
-    fn accept_visitor<V: ordering::SortVisitor<Self>>(visitor: &mut V)
+    fn accept_visitor<V: ordering::SortVisitor<Target=Self>>(visitor: &mut V)
     where
         Self: Sized,
     {
@@ -109,7 +109,7 @@ impl ordering::Accessor<MyRecord2> for IntField2 {
 impl ordering::ReferenceField for IntField2 {}
 
 impl ordering::Sortable for MyRecord2 {
-    fn accept_visitor<V: ordering::SortVisitor<Self>>(visitor: &mut V)
+    fn accept_visitor<V: ordering::SortVisitor<Target=Self>>(visitor: &mut V)
     where
         Self: Sized,
     {
@@ -223,7 +223,7 @@ impl ordering::Accessor<MyRecord3> for StringField3 {
 impl ordering::ReferenceField for StringField3 {}
 
 impl ordering::Sortable for MyRecord3 {
-    fn accept_visitor<V: ordering::SortVisitor<Self>>(visitor: &mut V)
+    fn accept_visitor<V: ordering::SortVisitor<Target=Self>>(visitor: &mut V)
     where
         Self: Sized,
     {

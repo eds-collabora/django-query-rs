@@ -451,7 +451,7 @@ pub fn sortable(input: TokenStream) -> TokenStream {
             #structs
             #[automatically_derived]
             impl #generics ::django_query::Sortable for #ident #generics #wc {
-                fn accept_visitor<V: ::django_query::ordering::SortVisitor<Self>>(visitor: &mut V)
+                fn accept_visitor<V: ::django_query::ordering::SortVisitor<Target=Self>>(visitor: &mut V)
                 where
                     Self: Sized
                 {

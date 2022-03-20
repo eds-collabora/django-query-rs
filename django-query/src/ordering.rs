@@ -4,9 +4,13 @@
   Primary key can be handled by implementing Ord?
 */
 
+use core::cell::Cell;
 use core::cmp::Ordering;
+use core::ops::Deref;
 
 use std::collections::BTreeMap;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -125,29 +129,104 @@ where
     }
 }
 
-pub trait SortVisitor<R> {
+pub trait SortVisitor {
+    type Target;
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
-        F: Field<R, Value = T> + 'static,
+        F: Field<Self::Target, Value = T> + 'static,
         T: Ord;
 
     fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, sort_key: &str)
     where
-        F: Field<R, Value = T> + 'static,
+        F: Field<Self::Target, Value = T> + 'static,
         T: Sortable + 'static;
 }
 
 pub trait Sortable {
-    fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V)
+    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V)
     where
         Self: Sized;
 }
 
+impl<T> Sortable for Rc<T>
+where
+    T: Sortable
+{
+    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V) {
+        let mut v = VisitorWrapper { parent: visitor };
+        T::accept_visitor(&mut v);
+    }
+}
+
+impl<T> Sortable for Arc<T>
+where
+    T: Sortable
+{
+    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V) {
+        let mut v = VisitorWrapper { parent: visitor };
+        T::accept_visitor(&mut v);
+    }
+}
+
+struct VisitorWrapper<'a, P> {
+    parent: &'a mut P
+}
+
+impl<'a, P, R, U> SortVisitor for VisitorWrapper<'a, P>
+where
+    P: SortVisitor<Target=U>,
+    U: Deref<Target=R>,
+{
+    type Target = R;
+    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    where
+        F: Field<R, Value=T> + 'static,
+        T: Ord
+    {
+        self.parent.visit_sort(name, &WrappedField { inner: field.clone() });
+    }
+
+    fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, sort_key: &str)
+    where
+        F: Field<R, Value = T> + 'static,
+        T: Sortable + 'static,
+    {
+        self.parent.visit_key_sort(
+            name,
+            &WrappedField {
+                inner: field.clone(),
+            },
+            sort_key,
+        );
+    }
+}
+
+#[derive(Clone)]
+struct WrappedField<F> {
+    inner: F,
+}
+
+impl<R, F, T, U> Field<U> for WrappedField<F>
+where
+    F: Field<R, Value = T>,
+    U: Deref<Target=R>
+{
+    type Value = T;
+    fn apply_comparison<V: Comparison<Self::Value>>(
+        &self,
+        op: &V,
+        a: &U,
+        b: &U,
+    ) -> Ordering {
+        self.inner.apply_comparison(op, a, b)
+    }
+}
+        
 impl<T> Sortable for Option<T>
 where
     T: Sortable,
 {
-    fn accept_visitor<V: SortVisitor<Self>>(visitor: &mut V)
+    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V)
     where
         Self: Sized,
     {
@@ -160,10 +239,11 @@ struct OptionVisitor<'a, P> {
     parent: &'a mut P,
 }
 
-impl<'a, P, R> SortVisitor<R> for OptionVisitor<'a, P>
+impl<'a, P, R> SortVisitor for OptionVisitor<'a, P>
 where
-    P: SortVisitor<Option<R>>,
+    P: SortVisitor<Target=Option<R>>,
 {
+    type Target = R;
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
         F: Field<R, Value = T> + 'static,
@@ -268,7 +348,8 @@ impl<R: Sortable + 'static> SortableRecord<R> {
     }
 }
 
-impl<R: Sortable> SortVisitor<R> for SortableRecord<R> {
+impl<R: Sortable> SortVisitor for SortableRecord<R> {
+    type Target = R;
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
         F: Field<R, Value = T> + 'static,
@@ -290,26 +371,26 @@ impl<R: Sortable> SortVisitor<R> for SortableRecord<R> {
             key: key,
             field: field.clone(),
             parent: self,
-            _marker: Default::default(),
         };
         T::accept_visitor(&mut v);
     }
 }
 
-struct KeyVisitor<'a, 'b, P, F, S> {
+struct KeyVisitor<'a, 'b, P, F> {
     name: &'a str,
     key: &'a str,
     field: F,
-    parent: &'b mut P,
-    _marker: core::marker::PhantomData<S>,
+    parent: &'b mut P
 }
 
-impl<'a, 'b, P, G, R, S> SortVisitor<R> for KeyVisitor<'a, 'b, P, G, S>
+impl<'a, 'b, P, G, R, S> SortVisitor for KeyVisitor<'a, 'b, P, G>
 where
-    P: SortVisitor<S>,
+    P: SortVisitor<Target=S>,
     G: Field<S, Value = R> + 'static,
     R: 'static,
 {
+    type Target = R;
+    
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
         F: Field<R, Value = T> + 'static,
@@ -340,7 +421,6 @@ where
                     inner: field.clone(),
                 },
                 parent: self.parent,
-                _marker: Default::default(),
             };
             T::accept_visitor(&mut v);
         }
