@@ -187,6 +187,9 @@ pub fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
 }
 
 pub trait RowSource
+where
+    Self::Rows: Deref,
+    for<'a> &'a <Self::Rows as Deref>::Target: IntoIterator<Item=&'a Self::Item>,
 {
     type Item;
     type Rows;
@@ -201,24 +204,24 @@ impl<T: Clone> RowSource for Vec<T> {
     }
 }
 
-// impl<T> RowSource for std::sync::Arc<Vec<T>> {
-//     type Item = T;
-//     type Rows = Self;
-//     fn get(&self) -> Self::Rows {
-//         self.clone()
-//     }
-// }
+impl<T> RowSource for std::sync::Arc<Vec<T>> {
+    type Item = T;
+    type Rows = Self;
+    fn get(&self) -> Self::Rows {
+        self.clone()
+    }
+}
 
 pub struct Endpoint<T> {
     row_source: T
 }
 
-impl<T, R, U> Endpoint<T>
+impl<T, R> Endpoint<T>
 where
     T: Send + Sync + RowSource<Item=R>,
     R: Queryable + Sortable + Debug + 'static,
-    <T as RowSource>::Rows: Deref<Target=U>,
-    for<'a> &'a U: IntoIterator<Item=&'a R>,
+    <T as RowSource>::Rows: Deref,
+    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item=&'a R>,
 {
     pub fn new(row_source: T) -> Self {
         Self { row_source }
@@ -266,12 +269,12 @@ where
     
 }
 
-impl<T, R, U> Respond for Endpoint<T>
+impl<T, R> Respond for Endpoint<T>
 where
     T: Send + Sync + RowSource<Item = R>,
     R: Queryable + Sortable + IntoRow + Debug + 'static,
-    <T as RowSource>::Rows: Deref<Target=U>,
-    for<'a> &'a U: IntoIterator<Item=&'a R>,
+    <T as RowSource>::Rows: Deref,
+    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item=&'a R>,
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         let data: <T as RowSource>::Rows = self.row_source.get();
