@@ -185,22 +185,28 @@ pub fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
     new_url
 }
 
-pub trait RowSource<'a>
-where
-    Self::Rows: IntoIterator<Item=Self::Item>,
+pub trait RowSource
 {
     type Item;
     type Rows;
-    fn get(&'a self) -> Self::Rows;
+    fn get(&self) -> Self::Rows;
 }
 
-impl<'a, T: 'a> RowSource<'a> for Vec<T> {
-    type Item = &'a T;
-    type Rows = &'a Vec<T>;
-    fn get(&'a self) -> Self::Rows {
-        self
+impl<T: Clone> RowSource for Vec<T> {
+    type Item = T;
+    type Rows = Self;
+    fn get(&self) -> Self::Rows {
+        self.clone()
     }
 }
+
+// impl<T> RowSource for std::sync::Arc<Vec<T>> {
+//     type Item = T;
+//     type Rows = Self;
+//     fn get(&self) -> Self::Rows {
+//         self.clone()
+//     }
+// }
 
 pub struct Endpoint<T> {
     rows: T
@@ -208,9 +214,9 @@ pub struct Endpoint<T> {
 
 impl<T, R> Endpoint<T>
 where
-    T: Send + Sync,
+    T: Send + Sync + RowSource<Item=R>,
     R: Queryable + Sortable + Debug + 'static,
-    for<'t> &'t T: IntoIterator<Item=&'t R>
+    for<'a> &'a <T as RowSource>::Rows: IntoIterator<Item=&'a R>,
 {
     pub fn new(rows: T) -> Self {
         Self { rows }
@@ -218,7 +224,7 @@ where
 
     fn parse_query<'a>(
         url: &Url,
-        iter: <&'a T as IntoIterator>::IntoIter,
+        iter: <&'a <T as RowSource>::Rows as IntoIterator>::IntoIter,
     ) -> Result<ResponseSet<&'a R>, MockError> {
         let mut rb = ResponseSetBuilder::new();
         let qr = QueryableRecord::<R>::new();
@@ -260,12 +266,13 @@ where
 
 impl<T, R> Respond for Endpoint<T>
 where
-    T: Send + Sync,
+    T: Send + Sync + RowSource<Item = R>,
     R: Queryable + Sortable + IntoRow + Debug + 'static,
-    for<'c> &'c T: IntoIterator<Item = &'c R>,
+    for<'a> &'a <T as RowSource>::Rows: IntoIterator<Item=&'a R>,
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
-        let body = Self::parse_query(&request.url, self.rows.into_iter());
+        let data: <T as RowSource>::Rows = self.rows.get();
+        let body = Self::parse_query(&request.url, (&data).into_iter());
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
             Err(e) => ResponseTemplate::new(500).set_body_string(e.to_string()),
