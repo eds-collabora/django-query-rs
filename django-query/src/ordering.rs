@@ -4,12 +4,10 @@
   Primary key can be handled by implementing Ord?
 */
 
-use core::cell::Cell;
 use core::cmp::Ordering;
 use core::ops::Deref;
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -146,16 +144,6 @@ pub trait Sortable {
     fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V)
     where
         Self: Sized;
-}
-
-impl<T> Sortable for Rc<T>
-where
-    T: Sortable
-{
-    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V) {
-        let mut v = VisitorWrapper { parent: visitor };
-        T::accept_visitor(&mut v);
-    }
 }
 
 impl<T> Sortable for Arc<T>

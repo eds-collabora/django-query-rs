@@ -1,5 +1,8 @@
+use core::ops::Deref;
+
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -577,19 +580,9 @@ where
     }
 }
 
+#[derive(Clone)]
 struct IterableField<F> {
     inner_field: F,
-}
-
-impl<F> Clone for IterableField<F>
-where
-    F: Clone,
-{
-    fn clone(&self) -> Self {
-        IterableField {
-            inner_field: self.inner_field.clone(),
-        }
-    }
 }
 
 impl<F, R, T, I> Field<I> for IterableField<F>
@@ -756,13 +749,155 @@ pub fn print_queryable<Q: Queryable>() {
     Q::get_meta().accept_visitor(&mut pv)
 }
 
-impl<T, I> Queryable for I
+impl<T> Queryable for Vec<T>
 where
-    T: Queryable + 'static,
-    for<'i> &'i I: IntoIterator<Item = &'i T>,
+    T: Queryable + 'static
 {
     type Meta = IterableRecord;
     fn get_meta() -> Self::Meta {
         IterableRecord
+    }
+}
+
+impl<T> Queryable for Option<T>
+where
+    T: Queryable + 'static
+{
+    type Meta = IterableRecord;
+    fn get_meta() -> Self::Meta {
+        IterableRecord
+    }
+}
+
+impl<T> Queryable for Arc<T>
+where
+    T: Queryable + 'static
+{
+    type Meta = ArcRecord;
+    fn get_meta() -> Self::Meta {
+        ArcRecord
+    }
+}
+
+pub struct ArcRecord;
+
+impl<R> Record<Arc<R>> for ArcRecord
+where
+    R: Queryable + 'static
+{
+    fn accept_visitor<V: RecordVisitor<Arc<R>>>(&self, visitor: &mut V)
+    where
+        Self: Sized,
+    {
+        let mut n = ArcRecordVisitor {
+            parent: visitor
+        };
+        R::get_meta().accept_visitor(&mut n);
+    }
+}
+
+struct ArcRecordVisitor<'a, P> {
+    parent: &'a mut P
+}
+
+impl<'a, P, R> RecordVisitor<R> for ArcRecordVisitor<'a, P>
+where
+    P: RecordVisitor<Arc<R>>,
+    R: 'static
+{
+    fn visit_member<F, O, T>(&mut self, name: &str, field: &F, defop: O)
+    where
+        F: Member<R, Value = T> + Clone + 'static,
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+        T: Operable,
+    {
+        self.parent.visit_member(
+            name,
+            &WrapperField {
+                inner_field: field.clone(),
+            },
+            defop,
+        );
+    }
+
+    fn visit_record<F, T, U>(&mut self, name: &str, field: &F, inner_record: &T)
+    where
+        F: Field<R, Value = U> + Clone + 'static,
+        T: Record<U> + 'static,
+        U: 'static,
+    {
+        self.parent.visit_record(
+            name,
+            &WrapperField {
+                inner_field: field.clone(),
+            },
+            inner_record,
+        )
+    }
+}
+
+#[derive(Clone)]
+struct WrapperField<F> {
+    inner_field: F,
+}
+
+impl<F, R, T, U> Field<U> for WrapperField<F>
+where
+    F: Field<R, Value = T>,
+    R: 'static,
+    U: Deref<Target=R>
+{
+    type Value = T;
+    fn apply<O: Operator<T>>(&'_ self, op: &O, data: &U) -> bool {
+        self.inner_field.apply(op, &*data)
+    }
+}
+
+impl<F, R, T, U> Member<U> for WrapperField<F>
+where
+    F: Member<R, Value = T> + 'static,
+    R: 'static,
+    U: Deref<Target=R>,
+    T: Operable,
+{
+    type Value = T;
+    fn apply<O: Operator<<T as Operable>::Base>>(&'_ self, op: &O, data: &U) -> bool {
+        self.inner_field.apply(op, &*data)
+    }
+    fn accept_visitor<V: MemberVisitor<Self, U, <Self as Member<U>>::Value>>(
+        &self,
+        visitor: &mut V,
+    ) {
+        let mut n = WrapperMemberVisitor {
+            parent: visitor,
+            field: self,
+            _marker: Default::default(),
+        };
+        self.inner_field.accept_visitor(&mut n);
+    }
+}
+
+struct WrapperMemberVisitor<'a, F, P, U> {
+    parent: &'a mut P,
+    field: &'a WrapperField<F>,
+    _marker: core::marker::PhantomData<U>
+}
+
+impl<'a, F, P, R, T, U> MemberVisitor<F, R, T> for WrapperMemberVisitor<'a, F, P, U>
+where
+    P: MemberVisitor<WrapperField<F>, U, T>,
+    F: Member<R, Value = T> + 'static,
+    R: 'static,
+    U: Deref<Target=R>,
+    T: Operable,
+{
+    fn visit_operator<O>(&mut self, name: &str, _f: &F, op: O)
+    where
+        F: 'static,
+        O: OperatorClass<<T as Operable>::Base> + 'static,
+        <O as OperatorClass<<T as Operable>::Base>>::Instance: 'static,
+    {
+        self.parent.visit_operator(name, self.field, op);
     }
 }

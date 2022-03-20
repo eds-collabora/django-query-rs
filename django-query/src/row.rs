@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
+use std::sync::Arc;
 
 use chrono::DateTime;
 use serde_json::value::Value;
@@ -187,6 +188,20 @@ where
         T::accept_column_visitor(visitor);
     }
 }
+
+impl<T> IntoRow for Arc<T>
+where
+    T: IntoRow
+{
+    fn accept_cell_visitor<V: CellVisitor>(&self, visitor: &mut V) {
+        T::accept_cell_visitor(&*self, visitor);
+    }
+
+    fn accept_column_visitor<V: ColumnVisitor>(visitor: &mut V) {
+        T::accept_column_visitor(visitor);
+    }
+}
+    
 
 pub trait AsForeignKey {
     fn as_foreign_key(&self, name: &str) -> CellValue;
