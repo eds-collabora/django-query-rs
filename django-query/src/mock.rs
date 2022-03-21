@@ -84,7 +84,7 @@ pub struct ResponseSetBuilder<T> {
     offset: usize,
 }
 
-impl<T: std::fmt::Debug> ResponseSetBuilder<T> {
+impl<T> ResponseSetBuilder<T> {
     pub fn new() -> Self {
         ResponseSetBuilder {
             ordering: Vec::new(),
@@ -219,7 +219,7 @@ pub struct Endpoint<T> {
 impl<T, R> Endpoint<T>
 where
     T: Send + Sync + RowSource<Item=R>,
-    R: Queryable + Sortable + Debug + 'static,
+    R: Queryable + Sortable + 'static,
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item=&'a R>,
 {
@@ -272,7 +272,7 @@ where
 impl<T, R> Respond for Endpoint<T>
 where
     T: Send + Sync + RowSource<Item = R>,
-    R: Queryable + Sortable + IntoRow + Debug + 'static,
+    R: Queryable + Sortable + IntoRow + 'static,
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item=&'a R>,
 {
