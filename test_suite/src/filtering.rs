@@ -5,129 +5,136 @@ use std::str::FromStr;
 use django_query::filtering::*;
 use django_query::*;
 
-// struct MyRecord<T> {
-//     string_field: String,
-//     int_field: i32,
-//     foo: T,
-// }
+struct MyRecord<T> {
+    string_field: String,
+    int_field: i32,
+    foo: T,
+}
 
-// #[derive(Clone)]
-// struct MyStringField;
+#[derive(Clone)]
+struct MyStringField;
 
-// impl<T> Field<MyRecord<T>> for MyStringField
-// where
-//     T: Clone,
-// {
-//     type Value = String;
-//     fn value<'a>(&self, data: &'a MyRecord<T>) -> &'a String {
-//         &data.string_field
-//     }
-// }
+impl<T> Member<MyRecord<T>> for MyStringField
+where
+    T: Clone,
+{
+    type Value = String;
+    fn apply<O: Operator<String>>(&self, op: &O, data: &MyRecord<T>) -> bool {
+        data.string_field.apply(op)
+    }
+    fn accept_visitor<V: MemberVisitor<Self, MyRecord<T>, Self::Value>>(&self, _visitor: &mut V) {}
+}
 
-// #[derive(Clone)]
-// struct MyIntField;
+#[derive(Clone)]
+struct MyIntField;
 
-// impl<T> Field<MyRecord<T>> for MyIntField
-// where
-//     T: Clone,
-// {
-//     type Value = i32;
-//     fn value<'a>(&self, data: &'a MyRecord<T>) -> &'a i32 {
-//         &data.int_field
-//     }
-// }
+impl<T> Member<MyRecord<T>> for MyIntField
+where
+    T: Clone,
+{
+    type Value = i32;
+    fn apply<O: Operator<i32>>(&self, op: &O, data: &MyRecord<T>) -> bool {
+        data.int_field.apply(op)
+    }
+    fn accept_visitor<V: MemberVisitor<Self, MyRecord<T>, Self::Value>>(&self, _visitor: &mut V) {}
+}
 
-// #[derive(Clone)]
-// struct MyTField;
+#[derive(Clone)]
+struct MyTField;
 
-// impl<T> Field<MyRecord<T>> for MyTField
-// where
-//     T: Clone,
-// {
-//     type Value = T;
-//     fn value<'a>(&self, data: &'a MyRecord<T>) -> &'a T {
-//         &data.foo
-//     }
-// }
+impl<T> Member<MyRecord<T>> for MyTField
+where
+    T: Clone + Operable,
+{
+    type Value = T;
+    fn apply<O: Operator<<T as Operable>::Base>>(&self, op: &O, data: &MyRecord<T>) -> bool {
+        data.foo.apply(op)
+    }
+    fn accept_visitor<V: MemberVisitor<Self, MyRecord<T>, Self::Value>>(&self, _visitor: &mut V) {}
+}
 
-// impl<T> Queryable for MyRecord<T>
-// where
-//     T: Clone + Equatable + FromStr + 'static,
-//     <T as FromStr>::Err: std::error::Error + Debug + Send + Sync,
-// {
-//     fn create_metadata() -> QueryableRecord<Self> {
-//         let mut qr = QueryableRecord::new();
-//         let qf1 =
-//             QueryableField::new(FilterClassImpl::new(MyStringField, operators::Eq));
-//         let qf2 = QueryableField::new(FilterClassImpl::new(MyIntField, operators::Eq));
-//         let qf3 = QueryableField::new(FilterClassImpl::new(MyTField, operators::Eq));
-//         qr.add_field("string_field", qf1);
-//         qr.add_field("int_field", qf2);
-//         qr.add_field("foo", qf3);
-//         qr
-//     }
-// }
+struct MyMeta;
 
-// #[test]
-// fn basic() {
-//     let r = MyRecord {
-//         string_field: "test".to_string(),
-//         int_field: 0,
-//         foo: "hello",
-//     };
-//     let sfield = MyStringField;
-//     let opcls = operators::Eq;
-//     let op = OperatorClass::<String>::instantiate(&opcls, "test").unwrap();
-//     let filter = FilterImpl::new(sfield, op);
-//     assert!(filter.filter_one(&r));
-// }
+impl<T> Record<MyRecord<T>> for MyMeta
+where
+    T: Operable + Clone,
+    <T as Operable>::Base: Eq + FromStr + 'static,
+    <<T as Operable>::Base as FromStr>::Err: std::error::Error + Debug + Send + Sync,
+{
+    fn accept_visitor<V: RecordVisitor<MyRecord<T>>>(&self, visitor: &mut V) {
+        visitor.visit_member("string_field", &MyStringField, operators::Eq);
+        visitor.visit_member("int_field", &MyIntField, operators::Eq);
+        visitor.visit_member("foo", &MyTField, operators::Eq);
+    }
+}
 
-// #[test]
-// fn generic() {
-//     let r = MyRecord {
-//         string_field: "test".to_string(),
-//         int_field: 0,
-//         foo: 5,
-//     };
-//     let sfield = MyTField;
-//     let opcls = operators::Eq;
-//     let op = OperatorClass::<i32>::instantiate(&opcls, "5").unwrap();
-//     let filter = FilterImpl::new(sfield, op);
-//     assert!(filter.filter_one(&r));
-// }
 
-// #[test]
-// fn records() {
-//     let r = MyRecord {
-//         string_field: "test".to_string(),
-//         int_field: 0,
-//         foo: 0,
-//     };
-//     let mut qr = QueryableRecord::new();
-//     let qf1 = QueryableField::new(FilterClassImpl::new(MyStringField, operators::Eq));
-//     qr.add_field("string_field", qf1);
+impl<T> Queryable for MyRecord<T>
+where
+    T: Clone + Operable + 'static,
+    <T as Operable>::Base: Eq + FromStr + 'static,
+    <<T as Operable>::Base as FromStr>::Err: std::error::Error + Debug + Send + Sync,
+{
+    type Meta = MyMeta;
+    fn get_meta() -> Self::Meta {
+        MyMeta
+    }
+}
 
-//     let filter = qr.create_filter("string_field", None, "test").unwrap();
-//     assert!(filter.filter_one(&r));
-// }
+#[test]
+fn basic() {
+    let r = MyRecord {
+        string_field: "test".to_string(),
+        int_field: 0,
+        foo: "hello",
+    };
+    let sfield = MyStringField;
+    let opcls = operators::Eq;
+    let op = OperatorClass::<String>::instantiate(&opcls, "test").unwrap();
+    let filter = FilterImpl::new(sfield, op);
+    assert!(filter.filter_one(&r));
+}
 
-// #[test]
-// fn using_trait() {
-//     let r = MyRecord {
-//         string_field: "test3".to_string(),
-//         int_field: 4,
-//         foo: "hi".to_string(),
-//     };
-//     let qr = MyRecord::create_metadata();
+#[test]
+fn generic() {
+    let r = MyRecord {
+        string_field: "test".to_string(),
+        int_field: 0,
+        foo: 5,
+    };
+    let sfield = MyTField;
+    let opcls = operators::Eq;
+    let op = OperatorClass::<i32>::instantiate(&opcls, "5").unwrap();
+    let filter = FilterImpl::new(sfield, op);
+    assert!(filter.filter_one(&r));
+}
 
-//     let filter = qr.create_filter("int_field", None, "4").unwrap();
-//     assert!(filter.filter_one(&r));
-// }
+#[test]
+fn records() {
+    let r = MyRecord {
+        string_field: "test".to_string(),
+        int_field: 0,
+        foo: 0,
+    };
+    let qr = QueryableRecord::<MyRecord<i32>>::new();
 
-/* What's missing here are:
-- attributes to rename fields
-- attributes to select operators, or groups of operators per field
- */
+    let filter = qr.create_filter("string_field", None, "test").unwrap();
+    assert!(filter.filter_one(&r));
+}
+
+#[test]
+fn using_trait() {
+    let r = MyRecord {
+        string_field: "test3".to_string(),
+        int_field: 4,
+        foo: "hi".to_string(),
+    };
+    let qr = QueryableRecord::<MyRecord<String>>::new();
+
+    let filter = qr.create_filter("int_field", None, "4").unwrap();
+    assert!(filter.filter_one(&r));
+}
+
 #[derive(Queryable)]
 struct MyRecord2<T>
 where
