@@ -91,7 +91,7 @@ struct PaginatedResponse<'a, T> {
 struct ResponseSetBuilder<T> {
     ordering: Vec<Box<dyn FnMut(&T, &T) -> Ordering>>,
     filtering: Vec<Box<dyn FnMut(&T) -> bool>>,
-    limit: usize,
+    limit: Option<usize>,
     offset: usize,
 }
 
@@ -106,7 +106,7 @@ impl<T> ResponseSetBuilder<T> {
         ResponseSetBuilder {
             ordering: Vec::new(),
             filtering: Vec::new(),
-            limit: 0,
+            limit: None,
             offset: 0,
         }
     }
@@ -122,7 +122,7 @@ impl<T> ResponseSetBuilder<T> {
     }
 
     pub fn limit(&mut self, limit: usize) -> &mut Self {
-        self.limit = limit;
+        self.limit = Some(limit);
         self
     }
 
@@ -150,11 +150,13 @@ impl<T> ResponseSetBuilder<T> {
             v.sort_by(|&x, &y| order(x, y));
         }
 
+        let limit = self.limit.unwrap_or(v.len());
+
         let start = min(v.len(), self.offset);
         let prev = if start > 0 {
             Some(Page {
-                offset: self.offset - min(self.offset, self.limit),
-                limit: self.limit,
+                offset: self.offset - min(self.offset, limit),
+                limit,
             })
         } else {
             None
@@ -162,11 +164,11 @@ impl<T> ResponseSetBuilder<T> {
 
         v.drain(..start);
 
-        let end = min(v.len(), self.limit);
+        let end = min(v.len(), limit);
         let next = if end < v.len() {
             Some(Page {
-                offset: self.offset + self.limit,
-                limit: self.limit,
+                offset: self.offset + limit,
+                limit,
             })
         } else {
             None
