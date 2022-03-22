@@ -1,6 +1,6 @@
 #![cfg(feature = "mock")]
 
-use core::cmp::{max, min, Ordering};
+use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::ops::Deref;
 use std::num::ParseIntError;
@@ -10,7 +10,7 @@ use thiserror::Error;
 use wiremock::http::Url;
 use wiremock::{Request, Respond, ResponseTemplate};
 
-use crate::{IntoRow, QueryableRecord, SortableRecord, Queryable, Sortable};
+use crate::{IntoRow, Queryable, QueryableRecord, Sortable, SortableRecord};
 
 #[derive(Debug, Error)]
 pub enum MockError {
@@ -69,7 +69,7 @@ impl<T: IntoRow> ResponseSet<&T> {
     }
 }
 
-fn to_rows<T: IntoRow>(data: &Vec<&T>) -> serde_json::Value {
+fn to_rows<T: IntoRow>(data: &[&T]) -> serde_json::Value {
     let mut array = Vec::new();
     for item in data {
         array.push(item.to_json());
@@ -77,11 +77,28 @@ fn to_rows<T: IntoRow>(data: &Vec<&T>) -> serde_json::Value {
     serde_json::Value::Array(array)
 }
 
-pub struct ResponseSetBuilder<T> {
+struct Page {
+    offset: usize,
+    limit: usize,
+}
+
+struct PaginatedResponse<'a, T> {
+    data: Vec<&'a T>,
+    next: Option<Page>,
+    prev: Option<Page>,
+}
+
+struct ResponseSetBuilder<T> {
     ordering: Vec<Box<dyn FnMut(&T, &T) -> Ordering>>,
     filtering: Vec<Box<dyn FnMut(&T) -> bool>>,
     limit: usize,
     offset: usize,
+}
+
+impl<T> Default for ResponseSetBuilder<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T> ResponseSetBuilder<T> {
@@ -114,10 +131,7 @@ impl<T> ResponseSetBuilder<T> {
         self
     }
 
-    pub fn apply<'a, I: Iterator<Item = &'a T>>(
-        &mut self,
-        iter: I,
-    ) -> (Vec<&'a T>, Option<(usize, usize)>, Option<(usize, usize)>) {
+    pub fn apply<'a, I: Iterator<Item = &'a T>>(&mut self, iter: I) -> PaginatedResponse<'a, T> {
         let mut v = Vec::new();
         for item in iter {
             let mut rejected = false;
@@ -138,7 +152,10 @@ impl<T> ResponseSetBuilder<T> {
 
         let start = min(v.len(), self.offset);
         let prev = if start > 0 {
-            Some((self.offset - min(self.offset, self.limit), self.limit))
+            Some(Page {
+                offset: self.offset - min(self.offset, self.limit),
+                limit: self.limit,
+            })
         } else {
             None
         };
@@ -147,14 +164,21 @@ impl<T> ResponseSetBuilder<T> {
 
         let end = min(v.len(), self.limit);
         let next = if end < v.len() {
-            Some((self.offset + self.limit, self.limit))
+            Some(Page {
+                offset: self.offset + self.limit,
+                limit: self.limit,
+            })
         } else {
             None
         };
 
         v.drain(end..);
 
-        (v, next, prev)
+        PaginatedResponse {
+            data: v,
+            next,
+            prev,
+        }
     }
 }
 
@@ -189,7 +213,7 @@ pub fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
 pub trait RowSource
 where
     Self::Rows: Deref,
-    for<'a> &'a <Self::Rows as Deref>::Target: IntoIterator<Item=&'a Self::Item>,
+    for<'a> &'a <Self::Rows as Deref>::Target: IntoIterator<Item = &'a Self::Item>,
 {
     type Item;
     type Rows;
@@ -213,15 +237,15 @@ impl<T> RowSource for std::sync::Arc<Vec<T>> {
 }
 
 pub struct Endpoint<T> {
-    row_source: T
+    row_source: T,
 }
 
 impl<T, R> Endpoint<T>
 where
-    T: Send + Sync + RowSource<Item=R>,
+    T: Send + Sync + RowSource<Item = R>,
     R: Queryable + Sortable + 'static,
     <T as RowSource>::Rows: Deref,
-    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item=&'a R>,
+    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
     pub fn new(row_source: T) -> Self {
         Self { row_source }
@@ -259,14 +283,17 @@ where
                 },
             }
         }
-        let (data, next, prev) = rb.apply(iter);
+        let response = rb.apply(iter);
         Ok(ResponseSet::new(
-            data,
-            next.map(|(offset, limit)| make_page_url(url, offset, limit).to_string()),
-            prev.map(|(offset, limit)| make_page_url(url, offset, limit).to_string()),
+            response.data,
+            response
+                .next
+                .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
+            response
+                .prev
+                .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
         ))
     }
-    
 }
 
 impl<T, R> Respond for Endpoint<T>
@@ -274,7 +301,7 @@ where
     T: Send + Sync + RowSource<Item = R>,
     R: Queryable + Sortable + IntoRow + 'static,
     <T as RowSource>::Rows: Deref,
-    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item=&'a R>,
+    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         let data: <T as RowSource>::Rows = self.row_source.get();

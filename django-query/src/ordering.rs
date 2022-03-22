@@ -141,37 +141,42 @@ pub trait SortVisitor {
 }
 
 pub trait Sortable {
-    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V)
+    fn accept_visitor<V: SortVisitor<Target = Self>>(visitor: &mut V)
     where
         Self: Sized;
 }
 
 impl<T> Sortable for Arc<T>
 where
-    T: Sortable
+    T: Sortable,
 {
-    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V) {
+    fn accept_visitor<V: SortVisitor<Target = Self>>(visitor: &mut V) {
         let mut v = VisitorWrapper { parent: visitor };
         T::accept_visitor(&mut v);
     }
 }
 
 struct VisitorWrapper<'a, P> {
-    parent: &'a mut P
+    parent: &'a mut P,
 }
 
 impl<'a, P, R, U> SortVisitor for VisitorWrapper<'a, P>
 where
-    P: SortVisitor<Target=U>,
-    U: Deref<Target=R>,
+    P: SortVisitor<Target = U>,
+    U: Deref<Target = R>,
 {
     type Target = R;
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
-        F: Field<R, Value=T> + 'static,
-        T: Ord
+        F: Field<R, Value = T> + 'static,
+        T: Ord,
     {
-        self.parent.visit_sort(name, &WrappedField { inner: field.clone() });
+        self.parent.visit_sort(
+            name,
+            &WrappedField {
+                inner: field.clone(),
+            },
+        );
     }
 
     fn visit_key_sort<F, T>(&mut self, name: &str, field: &F, sort_key: &str)
@@ -197,24 +202,19 @@ struct WrappedField<F> {
 impl<R, F, T, U> Field<U> for WrappedField<F>
 where
     F: Field<R, Value = T>,
-    U: Deref<Target=R>
+    U: Deref<Target = R>,
 {
     type Value = T;
-    fn apply_comparison<V: Comparison<Self::Value>>(
-        &self,
-        op: &V,
-        a: &U,
-        b: &U,
-    ) -> Ordering {
+    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &U, b: &U) -> Ordering {
         self.inner.apply_comparison(op, a, b)
     }
 }
-        
+
 impl<T> Sortable for Option<T>
 where
     T: Sortable,
 {
-    fn accept_visitor<V: SortVisitor<Target=Self>>(visitor: &mut V)
+    fn accept_visitor<V: SortVisitor<Target = Self>>(visitor: &mut V)
     where
         Self: Sized,
     {
@@ -229,7 +229,7 @@ struct OptionVisitor<'a, P> {
 
 impl<'a, P, R> SortVisitor for OptionVisitor<'a, P>
 where
-    P: SortVisitor<Target=Option<R>>,
+    P: SortVisitor<Target = Option<R>>,
 {
     type Target = R;
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
@@ -302,6 +302,12 @@ pub struct SortableRecord<R> {
     sorts: BTreeMap<String, Box<dyn SorterClass<R>>>,
 }
 
+impl<R: Sortable + 'static> Default for SortableRecord<R> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<R: Sortable + 'static> SortableRecord<R> {
     pub fn new() -> Self {
         let mut res = Self {
@@ -315,9 +321,9 @@ impl<R: Sortable + 'static> SortableRecord<R> {
         let parts = expr.split(',').collect::<Vec<&str>>();
         let mut full_sort: Option<Box<dyn Sorter<R>>> = None;
         for part in parts.iter().rev() {
-            let part_sort = if part.starts_with('-') {
+            let part_sort = if let Some(name) = part.strip_prefix('-') {
                 self.sorts
-                    .get(&part[1..])
+                    .get(name)
                     .ok_or_else(|| SorterError::NoSort(part.to_string()))?
                     .instantiate(true)
             } else {
@@ -332,7 +338,7 @@ impl<R: Sortable + 'static> SortableRecord<R> {
                 Some(part_sort)
             };
         }
-        Ok(full_sort.ok_or_else(|| SorterError::NoSort(expr.to_string()))?)
+        full_sort.ok_or_else(|| SorterError::NoSort(expr.to_string()))
     }
 }
 
@@ -355,8 +361,8 @@ impl<R: Sortable> SortVisitor for SortableRecord<R> {
         T: Sortable + 'static,
     {
         let mut v = KeyVisitor {
-            name: name,
-            key: key,
+            name,
+            key,
             field: field.clone(),
             parent: self,
         };
@@ -368,17 +374,17 @@ struct KeyVisitor<'a, 'b, P, F> {
     name: &'a str,
     key: &'a str,
     field: F,
-    parent: &'b mut P
+    parent: &'b mut P,
 }
 
 impl<'a, 'b, P, G, R, S> SortVisitor for KeyVisitor<'a, 'b, P, G>
 where
-    P: SortVisitor<Target=S>,
+    P: SortVisitor<Target = S>,
     G: Field<S, Value = R> + 'static,
     R: 'static,
 {
     type Target = R;
-    
+
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where
         F: Field<R, Value = T> + 'static,
@@ -403,7 +409,7 @@ where
         if name == self.key {
             let mut v = KeyVisitor {
                 name: self.name,
-                key: key,
+                key,
                 field: NestedField {
                     outer: self.field.clone(),
                     inner: field.clone(),
@@ -430,7 +436,7 @@ where
     fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
         let n = NestedComparison {
             inner: &self.inner,
-            op: op,
+            op,
         };
         self.outer.apply_comparison(&n, a, b)
     }
@@ -470,5 +476,4 @@ impl<R> Sorter<R> for StackedSorter<R> {
             Ordering::Equal => self.secondary.compare(a, b),
         }
     }
-
 }

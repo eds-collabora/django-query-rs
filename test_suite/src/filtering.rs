@@ -68,7 +68,6 @@ where
     }
 }
 
-
 impl<T> Queryable for MyRecord<T>
 where
     T: Clone + Operable + 'static,

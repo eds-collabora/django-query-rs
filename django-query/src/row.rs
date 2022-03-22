@@ -191,7 +191,7 @@ where
 
 impl<T> IntoRow for Arc<T>
 where
-    T: IntoRow
+    T: IntoRow,
 {
     fn accept_cell_visitor<V: CellVisitor>(&self, visitor: &mut V) {
         T::accept_cell_visitor(&*self, visitor);
@@ -201,7 +201,6 @@ where
         T::accept_column_visitor(visitor);
     }
 }
-    
 
 pub trait AsForeignKey {
     fn as_foreign_key(&self, name: &str) -> CellValue;
@@ -217,7 +216,7 @@ where
             value: None,
         };
         self.accept_cell_visitor(&mut k);
-        k.value.unwrap_or_else(|| CellValue::Null)
+        k.value.unwrap_or(CellValue::Null)
     }
 }
 
@@ -227,7 +226,7 @@ where
 {
     fn as_foreign_key(&self, name: &str) -> CellValue {
         let mut v = Vec::new();
-        for item in self.into_iter() {
+        for item in self.iter() {
             v.push(item.as_foreign_key(name))
         }
         CellValue::Array(v)

@@ -38,7 +38,7 @@ where
         if self.is_empty() {
             op.empty_collection()
         } else {
-            self.into_iter().any(|x| x.apply(op))
+            self.iter().any(|x| x.apply(op))
         }
     }
 }
@@ -483,6 +483,12 @@ pub struct QueryableRecord<R> {
     fields: BTreeMap<String, QueryableMember<R>>,
 }
 
+impl<R: Queryable> Default for QueryableRecord<R> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<R: Queryable> QueryableRecord<R> {
     /// Create a new `QueryableRecord`, by obtaining the `Meta` record
     /// from the target type, and visiting its fields and their
@@ -673,7 +679,7 @@ where
 {
     type Value = T;
     fn apply<O: Operator<T>>(&'_ self, op: &O, data: &I) -> bool {
-        data.into_iter().any(|x| self.inner_field.apply(op, &x))
+        data.into_iter().any(|x| self.inner_field.apply(op, x))
     }
 }
 
@@ -686,7 +692,7 @@ where
 {
     type Value = T;
     fn apply<O: Operator<<T as Operable>::Base>>(&'_ self, op: &O, data: &I) -> bool {
-        data.into_iter().any(|x| self.inner_field.apply(op, &x))
+        data.into_iter().any(|x| self.inner_field.apply(op, x))
     }
     fn accept_visitor<V: MemberVisitor<Self, I, <Self as Member<I>>::Value>>(
         &self,
@@ -831,7 +837,7 @@ pub fn print_queryable<Q: Queryable>() {
 
 impl<T> Queryable for Vec<T>
 where
-    T: Queryable + 'static
+    T: Queryable + 'static,
 {
     type Meta = IterableRecord;
     fn get_meta() -> Self::Meta {
@@ -841,7 +847,7 @@ where
 
 impl<T> Queryable for Option<T>
 where
-    T: Queryable + 'static
+    T: Queryable + 'static,
 {
     type Meta = IterableRecord;
     fn get_meta() -> Self::Meta {
@@ -851,7 +857,7 @@ where
 
 impl<T> Queryable for Arc<T>
 where
-    T: Queryable + 'static
+    T: Queryable + 'static,
 {
     type Meta = ArcRecord;
     fn get_meta() -> Self::Meta {
@@ -863,27 +869,25 @@ pub struct ArcRecord;
 
 impl<R> Record<Arc<R>> for ArcRecord
 where
-    R: Queryable + 'static
+    R: Queryable + 'static,
 {
     fn accept_visitor<V: RecordVisitor<Arc<R>>>(&self, visitor: &mut V)
     where
         Self: Sized,
     {
-        let mut n = ArcRecordVisitor {
-            parent: visitor
-        };
+        let mut n = ArcRecordVisitor { parent: visitor };
         R::get_meta().accept_visitor(&mut n);
     }
 }
 
 struct ArcRecordVisitor<'a, P> {
-    parent: &'a mut P
+    parent: &'a mut P,
 }
 
 impl<'a, P, R> RecordVisitor<R> for ArcRecordVisitor<'a, P>
 where
     P: RecordVisitor<Arc<R>>,
-    R: 'static
+    R: 'static,
 {
     fn visit_member<F, O, T>(&mut self, name: &str, field: &F, defop: O)
     where
@@ -926,7 +930,7 @@ impl<F, R, T, U> Field<U> for WrapperField<F>
 where
     F: Field<R, Value = T>,
     R: 'static,
-    U: Deref<Target=R>
+    U: Deref<Target = R>,
 {
     type Value = T;
     fn apply<O: Operator<T>>(&'_ self, op: &O, data: &U) -> bool {
@@ -938,7 +942,7 @@ impl<F, R, T, U> Member<U> for WrapperField<F>
 where
     F: Member<R, Value = T> + 'static,
     R: 'static,
-    U: Deref<Target=R>,
+    U: Deref<Target = R>,
     T: Operable,
 {
     type Value = T;
@@ -961,7 +965,7 @@ where
 struct WrapperMemberVisitor<'a, F, P, U> {
     parent: &'a mut P,
     field: &'a WrapperField<F>,
-    _marker: core::marker::PhantomData<U>
+    _marker: core::marker::PhantomData<U>,
 }
 
 impl<'a, F, P, R, T, U> MemberVisitor<F, R, T> for WrapperMemberVisitor<'a, F, P, U>
@@ -969,7 +973,7 @@ where
     P: MemberVisitor<WrapperField<F>, U, T>,
     F: Member<R, Value = T> + 'static,
     R: 'static,
-    U: Deref<Target=R>,
+    U: Deref<Target = R>,
     T: Operable,
 {
     fn visit_operator<O>(&mut self, name: &str, _f: &F, op: O)
