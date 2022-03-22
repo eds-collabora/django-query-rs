@@ -24,9 +24,12 @@ pub fn derive_sortable(input: syn::DeriveInput) -> pm2::TokenStream {
 
                 for attr in field.attrs.iter() {
                     if attr.path.is_ident("django") {
-                        let parsed = attr
-                            .parse_args::<DjangoMeta>()
-                            .expect("failed to parse django attribute");
+                        let parsed = match attr.parse_args::<DjangoMeta>() {
+                            Ok(parsed) => parsed,
+                            Err(e) => {
+                                return syn::Error::into_compile_error(e);
+                            }
+                        };
                         if let Some(name) = parsed.name {
                             fieldname = name;
                         }
