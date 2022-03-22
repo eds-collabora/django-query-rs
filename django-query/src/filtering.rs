@@ -292,29 +292,71 @@ where
     }
 }
 
+/// An `Operator` takes a single value and produces a true/false
+/// in/out filtering result. Examples of operators are Eq, In,
+/// Contains and so forth.
 pub trait Operator<T> {
+    /// Apply this operator a single value, producing a true/false
+    /// result.
     fn apply(&self, value: &T) -> bool;
+    /// Return a value for this operator when applied to an empty
+    /// collection.  Implicitly, operators are distributed over
+    /// collections with `any` semantics, so that any `true` result
+    /// means the collection evaluates to `true`. The default
+    /// behaviour for this method is to return `false`, which is
+    /// consistent with those semantics.
     fn empty_collection(&self) -> bool {
         false
     }
+    /// Return a value for this operator when applied to a `None`
+    /// value wrapping its target type (e.g. for an operator on T, we
+    /// are determining the behaviour on Option<T>). This is required
+    /// because we automatically implement all operators on Option<T>,
+    /// but in rare cases the operator's behaviour isn't well captured
+    /// by returning `false` for `None`.
     fn null_option(&self) -> bool {
         false
     }
 }
 
+/// An object that can make a particular type of `Operator`. Part of parsing
+/// a query is identifying the `OperatorClass` that can handle the requested
+/// operator class, and then using it to construct the particular `Operator`
+/// that will be used for that query.
 pub trait OperatorClass<T> {
+    /// The type of `Operator` this object can make.
     type Instance: Operator<T>;
+    /// Create a new `Operator`, parsing the supplied argument string
+    /// to initialise whatever representation this operator uses to
+    /// match against objects. Since this is a parsing operation, it
+    /// can fail.
     fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError>;
 }
 
+/// An object representing a test for objects to see whether they are
+/// included in a given result set. Each stanza of a query results in
+/// one `Filter` being constructed. There is no dynamic dispatch below
+/// this point in general, a unique codepath is generated for every
+/// combination of field and operator, which ends up resulting in a
+/// filter for each one of these.
 pub trait Filter<R> {
+    /// Produce a true/false response indicating an in/out result for the object.
     fn filter_one(&self, data: &R) -> bool;
+    /// Helper method to filter an entire vector by this filter. Note
+    /// that there is no virtual function call overhead here.
     fn filter_vec(&self, data: &mut Vec<R>) {
         data.retain(|r| self.filter_one(r))
     }
 }
 
+/// An object that can make a `Filter`. To be useful, we need to be able to
+/// store objects that can make different filters for the same target type.
+/// That means we need to return a `Box<dyn Filter<R>>` because we can't
+/// make the actual type we return observable (if we did, we could no longer
+/// store different implementors of this trait together).
 pub trait FilterClass<R> {
+    /// Create a new `Filter`, parsing the `rhs`, which are arguments to
+    /// whatever `Operator` this `Filter` encompassses.
     fn instantiate(&self, rhs: &str) -> Result<Box<dyn Filter<R>>, FilterError>;
 }
 
@@ -366,12 +408,17 @@ where
     }
 }
 
+/// The derivable trait from this file. A type implementing
+/// `Queryable` can provide an object which describes its supported
+/// fields and their operators.
 pub trait Queryable: Sized {
+    /// `Meta` is the type which can describe our fields and their operators.
     type Meta: Record<Self>;
+    /// `get_meta` produces an instance of our `Meta` type.
     fn get_meta() -> Self::Meta;
 }
 
-pub struct QueryableMember<R> {
+struct QueryableMember<R> {
     default: Box<dyn FilterClass<R>>,
     operators: BTreeMap<String, Box<dyn FilterClass<R>>>,
 }
@@ -426,12 +473,20 @@ where
     }
 }
 
+/// A QueryableRecord can be created for any type which implements
+/// `Queryable`. Its constructor supplies a visitor to the type's
+/// `Meta` type, and constructs the necessary `FilterClass` objects.
+/// It can be used directly to convert incoming query pairs from
+/// Django-style query URLs into appropriate `Filter` objects.
 pub struct QueryableRecord<R> {
     // map from field names to supported operators
     fields: BTreeMap<String, QueryableMember<R>>,
 }
 
 impl<R: Queryable> QueryableRecord<R> {
+    /// Create a new `QueryableRecord`, by obtaining the `Meta` record
+    /// from the target type, and visiting its fields and their
+    /// operators.
     pub fn new() -> Self {
         let mut res = Self {
             fields: BTreeMap::new(),
@@ -440,6 +495,19 @@ impl<R: Queryable> QueryableRecord<R> {
         res
     }
 
+    /// Create a new filter from a decomposed URL. Note that the
+    /// decomposition is ambiguous, so `create_filter_from_query_pair`
+    /// is often preferable. The ambiguity arises because there may be
+    /// no operator part, and the field part may have arbitrarily many
+    /// parts.  Since everything is separated with double underscores
+    /// there is no way without additional information to distinguish
+    /// an expression with an explicit operator from an expression on
+    /// a nested field with an implicit operator.
+    /// Here
+    /// - `field` is the field specification part of the string,
+    ///    including any nested fields.
+    /// - `operator` is the operator specification, if any.
+    /// - `rhs` is the argument part, after the `=` in the URL section.
     pub fn create_filter(
         &self,
         field: &str,
@@ -452,6 +520,12 @@ impl<R: Queryable> QueryableRecord<R> {
             .create_filter(operator, rhs)
     }
 
+    /// Create a new filter from a fragment of query URL. The expected
+    /// input is a `lhs=rhs` pair from a query string, with `lhs` and
+    /// `rhs` given separately. The output will either be an error, or
+    /// a `Filter` which can apply the specified to test to objects of
+    /// the target type, returning either `true` (include) or `false`
+    /// (exclude).
     pub fn create_filter_from_query_pair(
         &self,
         lhs: &str,
@@ -469,6 +543,12 @@ impl<R: Queryable> QueryableRecord<R> {
         }
     }
 
+    /// Create a new filter from a fragment of query URL. The expected
+    /// input is a `lhs=rhs` pair from a query string, with `lhs` and
+    /// `rhs` given together in a single string. The output will
+    /// either be an error, or a `Filter` which can apply the
+    /// specified to test to objects of the target type, returning
+    /// either `true` (include) or `false` (exclude).
     pub fn create_filter_from_query(&self, expr: &str) -> Result<Box<dyn Filter<R>>, FilterError> {
         let parts = expr.splitn(2, '=').collect::<Vec<_>>();
         if parts.len() != 2 {
