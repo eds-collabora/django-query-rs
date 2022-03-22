@@ -138,14 +138,14 @@ impl<T> ResponseSetBuilder<T> {
 
         let start = min(v.len(), self.offset);
         let prev = if start > 0 {
-            Some((max(0, self.offset - self.limit), self.limit))
+            Some((self.offset - min(self.offset, self.limit), self.limit))
         } else {
             None
         };
 
         v.drain(..start);
 
-        let end = max(v.len(), self.limit);
+        let end = min(v.len(), self.limit);
         let next = if end < v.len() {
             Some((self.offset + self.limit, self.limit))
         } else {
