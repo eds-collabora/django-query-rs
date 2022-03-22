@@ -172,10 +172,18 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
                 }
             });
         } else {
-            panic!("Queryable can only be derived for structs with named fields.");
+            return syn::Error::new(
+                ident.span(),
+                "Queryable can only be derived for structs with named fields.",
+            )
+            .to_compile_error();
         }
     } else {
-        panic!("Queryable can only be derived for structs with named fields.");
+        return syn::Error::new(
+            ident.span(),
+            "Queryable can only be derived for structs with named fields.",
+        )
+        .to_compile_error();
     }
 
     let res = quote::quote! {

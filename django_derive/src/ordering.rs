@@ -68,10 +68,18 @@ pub fn derive_sortable(input: syn::DeriveInput) -> pm2::TokenStream {
                 }
             }
         } else {
-            panic!("Sortable can only be derived for structs with named fields.");
+            return syn::Error::new(
+                ident.span(),
+                "Sortable can only be derived for structs with named fields.",
+            )
+            .to_compile_error();
         }
     } else {
-        panic!("Sortable can only be derived for structs with named fields.");
+        return syn::Error::new(
+            ident.span(),
+            "Sortable can only be derived for structs with named fields.",
+        )
+        .to_compile_error();
     }
 
     let res = quote::quote! {

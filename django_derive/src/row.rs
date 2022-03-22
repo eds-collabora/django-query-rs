@@ -62,10 +62,18 @@ pub fn derive_into_row(input: syn::DeriveInput) -> pm2::TokenStream {
                 }
             }
         } else {
-            panic!("IntoRow can only be derived for structs with named fields.");
+            return syn::Error::new(
+                ident.span(),
+                "IntoRow can only be derived for structs with named fields.",
+            )
+            .to_compile_error();
         }
     } else {
-        panic!("IntoRow can only be derived for structs with named fields.");
+        return syn::Error::new(
+            ident.span(),
+            "IntoRow can only be derived for structs with named fields.",
+        )
+        .to_compile_error();
     }
 
     let res = quote::quote! {
