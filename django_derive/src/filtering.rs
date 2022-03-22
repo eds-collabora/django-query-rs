@@ -72,22 +72,31 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
                             } => {
                                 for (key, value) in djoperators {
                                     if let Some(value) = value {
-                                        operators.insert(key, value);
+                                        operators.insert(key.to_string(), value);
                                     } else {
-                                        operators.insert(
-                                            key.clone(),
-                                            builtin_operators.get(key.as_str()).unwrap().clone(),
-                                        );
+                                        if let Some(op) = builtin_operators.get(key.to_string().as_str()) {
+                                            operators.insert(
+                                                key.to_string(),
+                                                op.clone(),
+                                            );
+                                        } else {
+                                            return syn::Error::new(
+                                                key.span(),
+                                                format!("unknown operator {}", key.to_string())
+                                            ).to_compile_error();
+                                        }
                                     }
                                 }
                                 match default_operator {
                                     (Some(op), None) => {
-                                        defop = Some(
-                                            builtin_operators
-                                                .get(op.to_string().as_str())
-                                                .unwrap()
-                                                .clone(),
-                                        )
+                                        if let Some(op) = builtin_operators.get(op.to_string().as_str()) {
+                                            defop = Some(op.clone());
+                                        } else {
+                                            return syn::Error::new(
+                                                op.span(),
+                                                format!("unknown operator {}", op.to_string())
+                                            ).to_compile_error();
+                                        }
                                     }
                                     (None, Some(fun)) => defop = Some(fun),
                                     _ => {}

@@ -88,7 +88,7 @@ impl syn::parse::Parse for DjangoItem {
 pub enum DjangoFiltering {
     Included {
         default_operator: (Option<syn::Ident>, Option<syn::Path>),
-        operators: BTreeMap<String, Option<syn::Path>>,
+        operators: BTreeMap<syn::Ident, Option<syn::Path>>,
     },
     Traversed,
     Excluded,
@@ -130,10 +130,10 @@ impl syn::parse::Parse for DjangoMeta {
                     for op in ops {
                         match op {
                             DjangoOperator::Standard(name) => {
-                                operators.insert(name.to_string(), None);
+                                operators.insert(name, None);
                             }
                             DjangoOperator::Custom(name, fun) => {
-                                operators.insert(name.to_string(), Some(fun));
+                                operators.insert(name, Some(fun));
                             }
                         }
                     }
