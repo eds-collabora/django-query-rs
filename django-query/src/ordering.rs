@@ -1,9 +1,3 @@
-/*
-  A Sorter object for records of type R
-  Recurses only onto primary keys for nested records
-  Primary key can be handled by implementing Ord?
-*/
-
 use core::cmp::Ordering;
 use core::ops::Deref;
 
@@ -56,6 +50,10 @@ pub trait Sorter<R> {
     fn compare(&self, a: &R, b: &R) -> Ordering;
 
     fn sort_vec(&self, vec: &mut Vec<R>) {
+        vec.sort_by(|x, y| self.compare(x, y))
+    }
+
+    fn sort_ref_vec(&self, vec: &mut Vec<&R>) {
         vec.sort_by(|x, y| self.compare(x, y))
     }
 }

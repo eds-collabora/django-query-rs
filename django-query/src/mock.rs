@@ -1,6 +1,6 @@
 #![cfg(feature = "mock")]
 
-use core::cmp::{min, Ordering};
+use core::cmp::min;
 use core::fmt::Debug;
 use core::ops::Deref;
 use std::num::ParseIntError;
@@ -11,6 +11,9 @@ use wiremock::http::Url;
 use wiremock::{Request, Respond, ResponseTemplate};
 
 use crate::{IntoRow, Queryable, QueryableRecord, Sortable, SortableRecord};
+
+use crate::ordering::Sorter;
+use crate::filtering::Filter;
 
 #[derive(Debug, Error)]
 pub enum MockError {
@@ -89,8 +92,8 @@ struct PaginatedResponse<'a, T> {
 }
 
 struct ResponseSetBuilder<T> {
-    ordering: Vec<Box<dyn FnMut(&T, &T) -> Ordering>>,
-    filtering: Vec<Box<dyn FnMut(&T) -> bool>>,
+    ordering: Vec<Box<dyn Sorter<T>>>,
+    filtering: Vec<Box<dyn Filter<T>>>,
     limit: Option<usize>,
     offset: usize,
 }
@@ -111,13 +114,13 @@ impl<T> ResponseSetBuilder<T> {
         }
     }
 
-    pub fn order_by<Op: 'static + FnMut(&T, &T) -> Ordering>(&mut self, order: Op) -> &mut Self {
-        self.ordering.push(Box::new(order));
+    pub fn order_by(&mut self, order: Box<dyn Sorter<T>>) -> &mut Self {
+        self.ordering.push(order);
         self
     }
 
-    pub fn filter_by<Op: 'static + FnMut(&T) -> bool>(&mut self, filter: Op) -> &mut Self {
-        self.filtering.push(Box::new(filter));
+    pub fn filter_by(&mut self, filter: Box<dyn Filter<T>>) -> &mut Self {
+        self.filtering.push(filter);
         self
     }
 
@@ -134,20 +137,15 @@ impl<T> ResponseSetBuilder<T> {
     pub fn apply<'a, I: Iterator<Item = &'a T>>(&mut self, iter: I) -> PaginatedResponse<'a, T> {
         let mut v = Vec::new();
         for item in iter {
-            let mut rejected = false;
-            for f in &mut self.filtering {
-                if !f(item) {
-                    rejected = true;
-                    break;
-                }
-            }
-            if !rejected {
-                v.push(item);
-            }
+            v.push(item)
         }
 
-        for order in &mut self.ordering {
-            v.sort_by(|&x, &y| order(x, y));
+        for f in &self.filtering {
+            f.filter_ref_vec(&mut v);
+        }
+
+        for order in &self.ordering {
+            order.sort_ref_vec(&mut v);
         }
 
         let limit = self.limit.unwrap_or(v.len());
@@ -264,8 +262,7 @@ where
         for (key, value) in pairs {
             match key.as_ref() {
                 "ordering" => {
-                    let sort = sr.create_sort(&*value)?;
-                    rb.order_by(move |x, y| sort.compare(x, y));
+                    rb.order_by(sr.create_sort(&*value)?);
                 }
                 "offset" => {
                     let v = usize::from_str(value.as_ref())?;
@@ -277,7 +274,7 @@ where
                 }
                 _ => match qr.create_filter_from_query_pair(&key, &value) {
                     Ok(filter) => {
-                        rb.filter_by(move |x| filter.filter_one(x));
+                        rb.filter_by(filter);
                     }
                     Err(_) => {
                         return Err(MockError::UnknownQueryParameter(String::from(key.as_ref())));

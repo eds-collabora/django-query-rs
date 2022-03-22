@@ -347,6 +347,11 @@ pub trait Filter<R> {
     fn filter_vec(&self, data: &mut Vec<R>) {
         data.retain(|r| self.filter_one(r))
     }
+    /// Helper method to filter an entire vector by this filter. Note
+    /// that there is no virtual function call overhead here.
+    fn filter_ref_vec(&self, data: &mut Vec<&R>) {
+        data.retain(|r| self.filter_one(r))
+    }
 }
 
 /// An object that can make a `Filter`. To be useful, we need to be able to
@@ -810,7 +815,7 @@ impl<R> RecordVisitor<R> for PrintingVisitor {
         } else {
             name.to_string()
         };
-        println!("Visited {}", name);
+        println!("Field: {}", name);
     }
     fn visit_record<F, T, U>(&mut self, name: &str, _field: &F, inner_record: &T)
     where
