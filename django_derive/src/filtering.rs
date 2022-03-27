@@ -34,6 +34,10 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
             syn::parse_quote! {::django_query::operators::IContains},
         ),
         (
+            "iexact",
+            syn::parse_quote! {::django_query::operators::IExact},
+        ),
+        (
             "startswith",
             syn::parse_quote! {::django_query::operators::StartsWith},
         ),

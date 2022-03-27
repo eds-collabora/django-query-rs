@@ -141,6 +141,34 @@ where
     }
 }
 
+pub struct IExactImpl {
+    target: String,
+}
+
+impl<T> Operator<T> for IExactImpl
+where
+    T: Display,
+{
+    fn apply(&self, value: &T) -> bool {
+        value.to_string().to_lowercase() == self.target
+    }
+}
+
+pub struct IExact;
+
+impl<T> OperatorClass<T> for IExact
+where
+    T: Display + FromStr,
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+{
+    type Instance = IExactImpl;
+    fn instantiate(&self, rhs: &str) -> Result<Self::Instance, FilterError> {
+        Ok(IExactImpl {
+            target: rhs.to_lowercase(),
+        })
+    }
+}
+
 pub struct StartsWithImpl {
     target: String,
 }

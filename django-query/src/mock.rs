@@ -6,14 +6,15 @@ use core::ops::Deref;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
+use log::{debug, trace};
 use thiserror::Error;
 use wiremock::http::Url;
 use wiremock::{Request, Respond, ResponseTemplate};
 
 use crate::{IntoRow, Queryable, QueryableRecord, Sortable, SortableRecord};
 
-use crate::ordering::Sorter;
 use crate::filtering::Filter;
+use crate::ordering::Sorter;
 
 #[derive(Debug, Error)]
 pub enum MockError {
@@ -303,11 +304,15 @@ where
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
+        trace!("Request URL: {}", request.url);
         let data: <T as RowSource>::Rows = self.row_source.get();
         let body = Self::parse_query(&request.url, (&data).into_iter());
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
-            Err(e) => ResponseTemplate::new(500).set_body_string(e.to_string()),
+            Err(e) => {
+                debug!("Failed to respond to {}: {}", request.url, e);
+                ResponseTemplate::new(500).set_body_string(e.to_string())
+            }
         }
     }
 }
