@@ -3,6 +3,7 @@
 use core::cmp::min;
 use core::fmt::Debug;
 use core::ops::Deref;
+use regex::{Captures, Regex};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
@@ -237,6 +238,55 @@ impl<T> RowSource for std::sync::Arc<Vec<T>> {
     }
 }
 
+fn parse_query<'a, T, R>(
+    url: &Url,
+    iter: <&'a <<T as RowSource>::Rows as Deref>::Target as IntoIterator>::IntoIter,
+) -> Result<ResponseSet<&'a R>, MockError>
+where
+    T: Send + Sync + RowSource<Item = R>,
+    R: Queryable + Sortable + IntoRow + 'static,
+    <T as RowSource>::Rows: Deref,
+    for<'t> &'t <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'t R>,
+{
+    let mut rb = ResponseSetBuilder::new();
+    let qr = QueryableRecord::<R>::new();
+    let sr = SortableRecord::<R>::new();
+    let pairs = url.query_pairs();
+    for (key, value) in pairs {
+        match key.as_ref() {
+            "ordering" => {
+                rb.order_by(sr.create_sort(&*value)?);
+            }
+            "offset" => {
+                let v = usize::from_str(value.as_ref())?;
+                rb.offset(v);
+            }
+            "limit" => {
+                let v = usize::from_str(value.as_ref())?;
+                rb.limit(v);
+            }
+            _ => match qr.create_filter_from_query_pair(&key, &value) {
+                Ok(filter) => {
+                    rb.filter_by(filter);
+                }
+                Err(_) => {
+                    return Err(MockError::UnknownQueryParameter(String::from(key.as_ref())));
+                }
+            },
+        }
+    }
+    let response = rb.apply(iter);
+    Ok(ResponseSet::new(
+        response.data,
+        response
+            .next
+            .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
+        response
+            .prev
+            .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
+    ))
+}
+
 pub struct Endpoint<T> {
     row_source: T,
 }
@@ -251,49 +301,6 @@ where
     pub fn new(row_source: T) -> Self {
         Self { row_source }
     }
-
-    fn parse_query<'a>(
-        url: &Url,
-        iter: <&'a <<T as RowSource>::Rows as Deref>::Target as IntoIterator>::IntoIter,
-    ) -> Result<ResponseSet<&'a R>, MockError> {
-        let mut rb = ResponseSetBuilder::new();
-        let qr = QueryableRecord::<R>::new();
-        let sr = SortableRecord::<R>::new();
-        let pairs = url.query_pairs();
-        for (key, value) in pairs {
-            match key.as_ref() {
-                "ordering" => {
-                    rb.order_by(sr.create_sort(&*value)?);
-                }
-                "offset" => {
-                    let v = usize::from_str(value.as_ref())?;
-                    rb.offset(v);
-                }
-                "limit" => {
-                    let v = usize::from_str(value.as_ref())?;
-                    rb.limit(v);
-                }
-                _ => match qr.create_filter_from_query_pair(&key, &value) {
-                    Ok(filter) => {
-                        rb.filter_by(filter);
-                    }
-                    Err(_) => {
-                        return Err(MockError::UnknownQueryParameter(String::from(key.as_ref())));
-                    }
-                },
-            }
-        }
-        let response = rb.apply(iter);
-        Ok(ResponseSet::new(
-            response.data,
-            response
-                .next
-                .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
-            response
-                .prev
-                .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
-        ))
-    }
 }
 
 impl<T, R> Respond for Endpoint<T>
@@ -306,7 +313,7 @@ where
     fn respond(&self, request: &Request) -> ResponseTemplate {
         trace!("Request URL: {}", request.url);
         let data: <T as RowSource>::Rows = self.row_source.get();
-        let body = Self::parse_query(&request.url, (&data).into_iter());
+        let body = parse_query::<T, R>(&request.url, (&data).into_iter());
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
             Err(e) => {
@@ -314,5 +321,141 @@ where
                 ResponseTemplate::new(500).set_body_string(e.to_string())
             }
         }
+    }
+}
+
+fn replace_into(target: &str, cap: &Captures<'_>) -> String {
+    let mut res = String::new();
+    cap.expand(target, &mut res);
+    res
+}
+
+pub struct UrlTransform {
+    regex: Regex,
+    path: String,
+    pairs: Vec<(String, String)>,
+}
+
+impl UrlTransform {
+    pub fn new(pattern: &str, path: &str, pairs: Vec<(&str, &str)>) -> UrlTransform {
+        Self {
+            regex: Regex::new(pattern).unwrap(),
+            path: path.to_string(),
+            pairs: pairs
+                .into_iter()
+                .map(|(x, y)| (x.to_string(), y.to_string()))
+                .collect(),
+        }
+    }
+
+    pub fn transform(&self, url: &Url) -> Url {
+        if let Some(captures) = self.regex.captures(url.path()) {
+            let mut u = url.clone();
+            u.set_path(&replace_into(&self.path, &captures));
+            for (k, v) in self.pairs.iter() {
+                u.query_pairs_mut()
+                    .append_pair(&replace_into(k, &captures), &replace_into(v, &captures));
+            }
+            u
+        } else {
+            url.clone()
+        }
+    }
+}
+
+pub struct NestedEndpoint<T> {
+    transform: UrlTransform,
+    row_source: T,
+}
+
+impl<T, R> NestedEndpoint<T>
+where
+    T: Send + Sync + RowSource<Item = R>,
+    R: Queryable + Sortable + 'static,
+    <T as RowSource>::Rows: Deref,
+    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
+{
+    pub fn new(transform: UrlTransform, row_source: T) -> Self {
+        Self {
+            transform,
+            row_source,
+        }
+    }
+}
+
+impl<T, R> Respond for NestedEndpoint<T>
+where
+    T: Send + Sync + RowSource<Item = R>,
+    R: Queryable + Sortable + IntoRow + 'static,
+    <T as RowSource>::Rows: Deref,
+    for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
+{
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        trace!("Request URL: {}", request.url);
+        let u = self.transform.transform(&request.url);
+        trace!("Transformed URL: {}", u);
+
+        let data: <T as RowSource>::Rows = self.row_source.get();
+        let body = parse_query::<T, R>(&u, (&data).into_iter());
+        match body {
+            Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
+            Err(e) => {
+                debug!("Failed to respond to {}: {}", request.url, e);
+                ResponseTemplate::new(500).set_body_string(e.to_string())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use test_log::test;
+    use wiremock::http::Url;
+
+    #[test]
+    fn test_transform() {
+        let u = Url::parse("http://foo.bar/jobs/3235/tests/?name=womble&path=bongle")
+            .expect("failed to parse url");
+        let t = UrlTransform::new(r"^/jobs/(\d+)/tests/$", r"/tests/$1", vec![("job", "$1")]);
+        let v = t.transform(&u);
+        assert_eq!(
+            v,
+            Url::parse("http://foo.bar/tests/3235?name=womble&path=bongle&job=3235")
+                .expect("failed to parse url")
+        );
+
+        let u = Url::parse("http://foo.bar/jobs/hello/tests/?name=womble&path=bongle")
+            .expect("failed to parse url");
+        let v = t.transform(&u);
+        assert_eq!(v, u);
+
+        let u = Url::parse(
+            "http://foo.bar/jobs/snomble/bomble/tests/sniffle_snaffle?name=womble&path=bongle",
+        )
+        .expect("failed to parse url");
+        let t = UrlTransform::new(
+            r"^/jobs/(?P<name>.*)/tests/(?P<womble>.*)$",
+            r"/tests/${name}",
+            vec![("job", "$womble")],
+        );
+        let v = t.transform(&u);
+        assert_eq!(
+            v,
+            Url::parse(
+                "http://foo.bar/tests/snomble/bomble?name=womble&path=bongle&job=sniffle_snaffle"
+            )
+            .expect("failed to parse url")
+        );
+
+        let u = Url::parse("http://foo.bar/jobs/hello/tests/?name=womble&path=bongle")
+            .expect("failed to parse url");
+        let v = t.transform(&u);
+        assert_eq!(
+            v,
+            Url::parse("http://foo.bar/tests/hello?name=womble&path=bongle&job=")
+                .expect("failed to parse url")
+        );
     }
 }
