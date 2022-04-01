@@ -1,3 +1,79 @@
+//! Create a filter for rust objects from a query URL
+//!
+//! Django encodes database queries into URL query strings in a way
+//! that can be frustrating to replicate ad-hoc. The simplest query
+//! parts are things like `foo=3` which means the column `foo` must
+//! have the exact value 3. More precisely, it means: "apply the
+//! default operator for column `foo`, to the contents of that column
+//! for each row, with a right hand side of 3, and only include the
+//! row if the result is `true`. The default operator is usually
+//! `exact`.
+//!
+//! There are three ways Django extends this simple model. Firstly,
+//! it's possible to specify a different operator than the default
+//! for some columns. Standard Django operators include `contains`,
+//! `gt`, `lt`, `in`, `iexact` and `isnull`. These are written in
+//! the query string as, for example, `foo__lt=3`, which filters on
+//! `foo < 3`.
+//!
+//! Secondly, columns can be multivalued. If in the preceding example
+//! column `foo` an array of integers, then `foo=3` would mean that
+//! the array must contain 3. In general, for collection valued
+//! columns, a filter is considered to pass if any individual element
+//! passes.
+//!
+//! Thirdly, there can be relations between tables. For example, if
+//! the column `foo` was actually of some complex type, drawn from a
+//! different table, then it's possible to filter within foo. Suppose
+//! the table for the type of member `foo` has a column `bar`, then
+//! our query string could be `foo__bar=3` to mean "select all objects
+//! whose member `foo` has a member `bar` whose value is 3".
+//!
+//! All of the preceding features combine, so it's possible to end up
+//! with query strings like `foo__bar__baz__lt=5` with the meaning
+//! (due to the structure with collections): "include objects within
+//! whose collection for member `foo`, one item has a member `bar`,
+//! and within that object's member `bar` one item has a member `baz`,
+//! and within the collection of integers for that object's member
+//! `baz` one integer is less than 5".
+//!
+//! The main trait in this module is [Queryable] which has an
+//! associated derive macro. By deriving [Queryable] it becomes
+//! possible to construct a [QueryableRecord] for a type. This can be
+//! given query strings, and will convert them into boxed [Filter]
+//! objects. The virtual function call overhead is right at the top
+//! here, in the call to the filter object, so where possible
+//! filtering entire vectors at a time is preferable to reduce
+//! overheads (since each call into the boxed [Filter] incurs
+//! overhead, but only one such call is needed to filter an entire
+//! collection.)
+//!
+//! Example
+//! ```rust
+//! use std::sync::Arc;
+//! use django_query::{Queryable, QueryableRecord};
+//!
+//! #[derive(Queryable)]
+//! struct Bar {
+//!   #[django(op(lt))]
+//!   a: i32,
+//! }
+//! 
+//! #[derive(Queryable)]
+//! struct Foo {
+//!   #[django(op(lt))]
+//!   a: i32,
+//!   #[django(traverse)]
+//!   b: Bar,
+//! }
+//!
+//! let foo = Foo { a: 5, b: Bar { a: 0 } };
+//! let qr = QueryableRecord::<Foo>::new();
+//! let filter = qr.create_filter_from_query("b__a__lt=1").unwrap();
+//! assert!(filter.filter_one(&foo));
+//! let filter = qr.create_filter_from_query("b__a__lt=0").unwrap();
+//! assert!(!filter.filter_one(&foo));
+//! ```
 use core::ops::Deref;
 
 use std::collections::BTreeMap;
