@@ -55,20 +55,20 @@ where
 
 struct MyMeta;
 
-impl<T> Record<MyRecord<T>> for MyMeta
+impl<T> Meta<MyRecord<T>> for MyMeta
 where
     T: Operable + Clone,
     <T as Operable>::Base: Eq + FromStr + 'static,
     <<T as Operable>::Base as FromStr>::Err: std::error::Error + Debug + Send + Sync,
 {
-    fn accept_visitor<V: RecordVisitor<MyRecord<T>>>(&self, visitor: &mut V) {
+    fn accept_visitor<V: MetaVisitor<MyRecord<T>>>(&self, visitor: &mut V) {
         visitor.visit_member("string_field", &MyStringField, operators::Eq);
         visitor.visit_member("int_field", &MyIntField, operators::Eq);
         visitor.visit_member("foo", &MyTField, operators::Eq);
     }
 }
 
-impl<T> Queryable for MyRecord<T>
+impl<T> Filterable for MyRecord<T>
 where
     T: Clone + Operable + 'static,
     <T as Operable>::Base: Eq + FromStr + 'static,
@@ -77,6 +77,22 @@ where
     type Meta = MyMeta;
     fn get_meta() -> Self::Meta {
         MyMeta
+    }
+}
+
+struct TestFilter<F, O> {
+    field: F,
+    operator: O,
+}
+
+impl<F, O, T, R> Filter<R> for TestFilter<F, O>
+where
+    F: Member<R, Value = T>,
+    O: Operator<<T as Operable>::Base>,
+    T: Operable,
+{
+    fn filter_one(&self, data: &R) -> bool {
+        self.field.apply(&self.operator, data)
     }
 }
 
@@ -90,7 +106,10 @@ fn basic() {
     let sfield = MyStringField;
     let opcls = operators::Eq;
     let op = OperatorClass::<String>::instantiate(&opcls, "test").unwrap();
-    let filter = FilterImpl::new(sfield, op);
+    let filter = TestFilter {
+        field: sfield,
+        operator: op,
+    };
     assert!(filter.filter_one(&r));
 }
 
@@ -104,7 +123,10 @@ fn generic() {
     let sfield = MyTField;
     let opcls = operators::Eq;
     let op = OperatorClass::<i32>::instantiate(&opcls, "5").unwrap();
-    let filter = FilterImpl::new(sfield, op);
+    let filter = TestFilter {
+        field: sfield,
+        operator: op,
+    };
     assert!(filter.filter_one(&r));
 }
 
@@ -115,7 +137,7 @@ fn records() {
         int_field: 0,
         foo: 0,
     };
-    let qr = QueryableRecord::<MyRecord<i32>>::new();
+    let qr = OperatorSet::<MyRecord<i32>>::new();
 
     let filter = qr.create_filter("string_field", None, "test").unwrap();
     assert!(filter.filter_one(&r));
@@ -128,13 +150,13 @@ fn using_trait() {
         int_field: 4,
         foo: "hi".to_string(),
     };
-    let qr = QueryableRecord::<MyRecord<String>>::new();
+    let qr = OperatorSet::<MyRecord<String>>::new();
 
     let filter = qr.create_filter("int_field", None, "4").unwrap();
     assert!(filter.filter_one(&r));
 }
 
-#[derive(Queryable)]
+#[derive(Filterable)]
 struct MyRecord2<T>
 where
     T: Operable + 'static,
@@ -155,7 +177,7 @@ fn using_macro() {
         int_field: 4,
         foo: 11,
     };
-    let qr = QueryableRecord::<MyRecord2<_>>::new();
+    let qr = OperatorSet::<MyRecord2<_>>::new();
 
     let filter = qr.create_filter("int_field", None, "4").unwrap();
     assert!(filter.filter_one(&r));
@@ -176,7 +198,7 @@ fn using_filter() {
         int_field: -1,
         foo: 12,
     };
-    let qr = QueryableRecord::<MyRecord2<_>>::new();
+    let qr = OperatorSet::<MyRecord2<_>>::new();
     let filter = qr.create_filter_from_query_pair("int_field", "4").unwrap();
     assert!(filter.filter_one(&r));
     assert!(!filter.filter_one(&r2));
@@ -203,14 +225,14 @@ fn using_in() {
         int_field: -1,
         foo: 1,
     };
-    let qr = QueryableRecord::<MyRecord2<_>>::new();
+    let qr = OperatorSet::<MyRecord2<_>>::new();
     let filter = qr.create_filter_from_query("bar__in=1,2,11").unwrap();
     assert!(filter.filter_one(&r));
     assert!(!filter.filter_one(&r2));
     assert!(filter.filter_one(&r3));
 }
 
-#[derive(Queryable)]
+#[derive(Filterable)]
 struct MyRecord3<T>
 where
     T: Operable + 'static,
@@ -242,7 +264,7 @@ fn using_in2() {
         int_field: -1,
         foo: 1,
     };
-    let qr = QueryableRecord::<MyRecord3<_>>::new();
+    let qr = OperatorSet::<MyRecord3<_>>::new();
     let filter = qr.create_filter_from_query("bar__in=1,2,11").unwrap();
     assert!(filter.filter_one(&r));
     assert!(!filter.filter_one(&r2));
@@ -266,14 +288,14 @@ fn using_default_op1() {
         int_field: 1,
         foo: 1,
     };
-    let qr = QueryableRecord::<MyRecord3<_>>::new();
+    let qr = OperatorSet::<MyRecord3<_>>::new();
     let filter = qr.create_filter_from_query("int_field=1,4").unwrap();
     assert!(filter.filter_one(&r));
     assert!(!filter.filter_one(&r2));
     assert!(filter.filter_one(&r3));
 }
 
-#[derive(Queryable)]
+#[derive(Filterable)]
 struct MyRecord4<T>
 where
     T: Operable + 'static,
@@ -288,7 +310,7 @@ where
         op(endswith)
     )]
     string_field: String,
-    #[django(default_fun = operators::In, op(eq,lt,lte,gt,gte=operators::GreaterEq))]
+    #[django(default_fun = operators::In, op(exact,lt,lte,gt,gte=operators::GreaterEq))]
     int_field: i32,
     #[django(rename = "bar", op(in))]
     foo: T,
@@ -311,7 +333,7 @@ fn using_default_op2() {
         int_field: 1,
         foo: 1,
     };
-    let qr = QueryableRecord::<MyRecord4<_>>::new();
+    let qr = OperatorSet::<MyRecord4<_>>::new();
     let filter = qr.create_filter_from_query("int_field=1,4").unwrap();
     assert!(filter.filter_one(&r));
     assert!(!filter.filter_one(&r2));
@@ -335,8 +357,8 @@ fn using_more_operators() {
         int_field: 1,
         foo: 1,
     };
-    let qr = QueryableRecord::<MyRecord4<_>>::new();
-    let filter = qr.create_filter_from_query("int_field__eq=1").unwrap();
+    let qr = OperatorSet::<MyRecord4<_>>::new();
+    let filter = qr.create_filter_from_query("int_field__exact=1").unwrap();
     assert!(!filter.filter_one(&r));
     assert!(!filter.filter_one(&r2));
     assert!(filter.filter_one(&r3));
@@ -388,13 +410,13 @@ fn using_more_operators() {
     assert!(filter.filter_one(&r3));
 }
 
-#[derive(Queryable)]
+#[derive(Filterable)]
 struct MyNestedRecord {
     string_field: String,
     int_field: i32,
 }
 
-#[derive(Queryable)]
+#[derive(Filterable)]
 struct MyRecord5 {
     string_field: String,
     int_field: i32,
@@ -412,7 +434,7 @@ fn basic_nesting() {
             int_field: 11,
         },
     };
-    let qr = QueryableRecord::<MyRecord5>::new();
+    let qr = OperatorSet::<MyRecord5>::new();
     let filter = qr.create_filter_from_query("foo__int_field=11").unwrap();
     assert!(filter.filter_one(&r));
     let filter = qr.create_filter_from_query("foo__int_field=4").unwrap();
@@ -423,7 +445,7 @@ fn basic_nesting() {
     assert!(!filter.filter_one(&r));
 }
 
-#[derive(Queryable)]
+#[derive(Filterable)]
 struct MyRecord6 {
     string_field: String,
     #[django(traverse)]
@@ -449,9 +471,8 @@ fn vector_nesting() {
             },
         ],
     };
-    print_queryable::<MyRecord6>();
 
-    let qr = QueryableRecord::<MyRecord6>::new();
+    let qr = OperatorSet::<MyRecord6>::new();
     let filter = qr.create_filter_from_query("foo__int_field=1").unwrap();
     assert!(filter.filter_one(&r));
     let filter = qr.create_filter_from_query("foo__int_field=2").unwrap();
@@ -460,4 +481,17 @@ fn vector_nesting() {
     assert!(filter.filter_one(&r));
     let filter = qr.create_filter_from_query("foo__int_field=4").unwrap();
     assert!(!filter.filter_one(&r));
+}
+
+#[test]
+fn test_print() {
+    use django_query::{filtering::print_filters, Filterable};
+
+    #[derive(Filterable)]
+    struct Foo {
+        #[django(op(lt, gt, gte, lte))]
+        a: i32,
+    }
+
+    print_filters::<Foo>();
 }

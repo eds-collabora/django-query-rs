@@ -4,7 +4,7 @@
 //! Django-style API, although some of the parts may be useful beyond
 //! just mocking. The main tools provided are:
 //!
-//! - The [Queryable] trait, and its derive macro, which allow you to
+//! - The [Filterable] trait, and its derive macro, which allow you to
 //!   use attribute markup to automatically parse Django-style filter
 //!   URLs into filter objects.
 //!
@@ -24,11 +24,11 @@
 //!
 //! Example:
 //! ```rust
-//! use django_query::{IntoRow, Queryable, Sortable, mock::Endpoint};
+//! use django_query::{IntoRow, Filterable, Sortable, mock::Endpoint};
 //! use std::sync::Arc;
 //! use wiremock::{Mock, MockServer, matchers, http::Url};
 //!
-//! #[derive(IntoRow, Queryable, Sortable)]
+//! #[derive(IntoRow, Filterable, Sortable)]
 //! struct Foo {
 //!     #[django(sort, op(in, icontains, iexact))]
 //!     name: String,
@@ -36,7 +36,7 @@
 //!     value: i32
 //! }
 //!
-//! #[derive(IntoRow, Queryable, Sortable)]
+//! #[derive(IntoRow, Filterable, Sortable)]
 //! struct Bar {
 //!     #[django(op(icontains, startswith))]
 //!     names: Vec<String>,
@@ -107,8 +107,8 @@ pub mod operators;
 pub mod ordering;
 pub mod row;
 
-pub use crate::filtering::{Queryable, QueryableRecord};
+pub use crate::filtering::{Filterable, OperatorSet};
 pub use crate::operators::Scalar;
-pub use crate::ordering::{Sortable, SortableRecord};
-pub use crate::row::{IntoRow, IntoCellValue, StringCellValue};
-pub use django_derive::{IntoRow, Queryable, Sortable};
+pub use crate::ordering::{Sortable, OrderingSet};
+pub use crate::row::{IntoCellValue, IntoRow, StringCellValue};
+pub use django_derive::{IntoRow, Filterable, Sortable};

@@ -1,3 +1,23 @@
+//! Standard operators from Django for use with filtering.
+//!
+//! These have short names, matching their Django names, that can be used in the
+//! derive macro for [Filterable](crate::Filterable). There are the following operators:
+//!
+//! Operator         | OperatorClass   | Short name | Restrictions
+//! -----------------|-----------------|------------|--------------
+//! [EqImpl]         | [struct@Eq]     | exact      | T: [Eq](core::cmp::Eq)
+//! [InImpl]         | [In]            | in         | T: [Eq](core::cmp::Eq)
+//! [ContainsImpl]   | [Contains]      | contains   | T: [Display](std::fmt::Display)
+//! [IContainsImpl]  | [IContains]     | icontains  | T: [Display](std::fmt::Display)
+//! [IExactImpl]     | [IExact]        | iexact     | T: [Display](std::fmt::Display)
+//! [StartsWithImpl] | [StartsWith]    | startswith | T: [Display](std::fmt::Display)
+//! [EndsWithImpl]   | [EndsWith]      | endswith   | T: [Display](std::fmt::Display)
+//! [LessImpl]       | [Less]          | lt         | T: [Ord](core::cmp::Ord)
+//! [GreaterImpl]    | [Greater]       | gt         | T: [Ord](core::cmp::Ord)
+//! [LessEqImpl]     | [LessEq]        | lte        | T: [Ord](core::cmp::Ord)
+//! [GreaterEqImpl]  | [GreaterEq]     | gte        | T: [Ord](core::cmp::Ord)
+//! [IsNullImpl]     | [IsNull]        | isnull     |
+
 use std::fmt::Display;
 use std::str::FromStr;
 

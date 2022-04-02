@@ -4,7 +4,7 @@ use proc_macro2 as pm2;
 
 use crate::attributes::{DjangoFiltering, DjangoMeta};
 
-pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
+pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
     let syn::DeriveInput {
         ident,
         data,
@@ -16,7 +16,7 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
     let mut structs = pm2::TokenStream::new();
 
     let builtin_operators = BTreeMap::<_, syn::Path>::from([
-        ("eq", syn::parse_quote! {::django_query::operators::Eq}),
+        ("exact", syn::parse_quote! {::django_query::operators::Eq}),
         ("in", syn::parse_quote! {::django_query::operators::In}),
         ("lt", syn::parse_quote! {::django_query::operators::Less}),
         ("lte", syn::parse_quote! {::django_query::operators::LessEq}),
@@ -149,7 +149,7 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
 
                 if traversed {
                     body.extend(quote::quote! {
-                        visitor.visit_record(#fieldname, &#structname, &<#fieldtype as ::django_query::filtering::Queryable>::get_meta());
+                        visitor.visit_record(#fieldname, &#structname, &<#fieldtype as ::django_query::filtering::Filterable>::get_meta());
                     });
                 } else {
                     structs.extend(quote::quote! {
@@ -178,9 +178,9 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
             }
 
             structs.extend(quote::quote! {
-                pub struct MyRecord;
-                impl #generics ::django_query::filtering::Record<#ident #generics> for MyRecord #wc {
-                    fn accept_visitor<V: ::django_query::filtering::RecordVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
+                pub struct Meta;
+                impl #generics ::django_query::filtering::Meta<#ident #generics> for Meta #wc {
+                    fn accept_visitor<V: ::django_query::filtering::MetaVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
                         #body
                     }
                 }
@@ -188,14 +188,14 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
         } else {
             return syn::Error::new(
                 ident.span(),
-                "Queryable can only be derived for structs with named fields.",
+                "Filterable can only be derived for structs with named fields.",
             )
             .to_compile_error();
         }
     } else {
         return syn::Error::new(
             ident.span(),
-            "Queryable can only be derived for structs with named fields.",
+            "Filterable can only be derived for structs with named fields.",
         )
         .to_compile_error();
     }
@@ -204,10 +204,10 @@ pub fn derive_queryable(input: syn::DeriveInput) -> pm2::TokenStream {
         const _: () = {
             #structs
             #[automatically_derived]
-            impl #generics ::django_query::Queryable for #ident #generics #wc {
-                type Meta = MyRecord;
+            impl #generics ::django_query::Filterable for #ident #generics #wc {
+                type Meta = Meta;
                 fn get_meta() -> Self::Meta {
-                    MyRecord
+                    Meta
                 }
             }
         };

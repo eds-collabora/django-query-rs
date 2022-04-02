@@ -208,10 +208,10 @@ where
 
 impl<T> IntoCellValue for Vec<T>
 where
-    T: IntoCellValue
+    T: IntoCellValue,
 {
     fn to_cell_value(&self) -> CellValue {
-        CellValue::Array(self.into_iter().map(|item| item.to_cell_value()).collect())
+        CellValue::Array(self.iter().map(|item| item.to_cell_value()).collect())
     }
 }
 
@@ -251,7 +251,7 @@ pub trait IntoRow {
         self.accept_cell_visitor(&mut r);
         r.values
     }
-    
+
     /// Convert an instance of this type into a [serde_json::Value]
     fn to_json(&self) -> Value {
         let mut j = JsonVisitor {

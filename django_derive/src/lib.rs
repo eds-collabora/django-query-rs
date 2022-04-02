@@ -7,11 +7,11 @@ mod filtering;
 mod ordering;
 mod row;
 
-#[proc_macro_derive(Queryable, attributes(django))]
+#[proc_macro_derive(Filterable, attributes(django))]
 pub fn queryable(input: TokenStream) -> TokenStream {
     let derive: syn::DeriveInput = syn::parse_macro_input!(input);
 
-    let res: pm2::TokenStream = filtering::derive_queryable(derive);
+    let res: pm2::TokenStream = filtering::derive_filterable(derive);
 
     res.into()
 }

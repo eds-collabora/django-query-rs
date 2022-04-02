@@ -296,17 +296,17 @@ where
     }
 }
 
-pub struct SortableRecord<R> {
+pub struct OrderingSet<R> {
     sorts: BTreeMap<String, Box<dyn SorterClass<R>>>,
 }
 
-impl<R: Sortable + 'static> Default for SortableRecord<R> {
+impl<R: Sortable + 'static> Default for OrderingSet<R> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<R: Sortable + 'static> SortableRecord<R> {
+impl<R: Sortable + 'static> OrderingSet<R> {
     pub fn new() -> Self {
         let mut res = Self {
             sorts: BTreeMap::new(),
@@ -340,7 +340,7 @@ impl<R: Sortable + 'static> SortableRecord<R> {
     }
 }
 
-impl<R: Sortable> SortVisitor for SortableRecord<R> {
+impl<R: Sortable> SortVisitor for OrderingSet<R> {
     type Target = R;
     fn visit_sort<F, T>(&mut self, name: &str, field: &F)
     where

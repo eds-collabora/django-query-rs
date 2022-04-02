@@ -54,7 +54,7 @@ fn test_basic() {
         },
     ];
 
-    let sr = ordering::SortableRecord::<MyRecord>::new();
+    let sr = ordering::OrderingSet::<MyRecord>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -144,7 +144,7 @@ fn test_nesting() {
         },
     ];
 
-    let sr = ordering::SortableRecord::<MyRecord2>::new();
+    let sr = ordering::OrderingSet::<MyRecord2>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -299,7 +299,7 @@ fn test_deeper_nesting() {
         },
     ];
 
-    let sr = ordering::SortableRecord::<MyRecord3>::new();
+    let sr = ordering::OrderingSet::<MyRecord3>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -435,7 +435,7 @@ fn test_macro() {
         },
     ];
 
-    let sr = ordering::SortableRecord::<MyRecord4>::new();
+    let sr = ordering::OrderingSet::<MyRecord4>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -579,7 +579,7 @@ fn test_rename() {
         },
     ];
 
-    let sr = ordering::SortableRecord::<MyRecord5>::new();
+    let sr = ordering::OrderingSet::<MyRecord5>::new();
 
     let sort = sr.create_sort("int").unwrap();
     sort.sort_vec(&mut v);
@@ -655,7 +655,7 @@ fn test_double() {
         },
     ];
 
-    let sr = ordering::SortableRecord::<MyRecord>::new();
+    let sr = ordering::OrderingSet::<MyRecord>::new();
 
     let sort = sr.create_sort("int_field,string_field").unwrap();
     sort.sort_vec(&mut v);

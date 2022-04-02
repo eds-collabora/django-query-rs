@@ -12,7 +12,7 @@ use thiserror::Error;
 use wiremock::http::Url;
 use wiremock::{Request, Respond, ResponseTemplate};
 
-use crate::{IntoRow, Queryable, QueryableRecord, Sortable, SortableRecord};
+use crate::{IntoRow, Filterable, OperatorSet, Sortable, OrderingSet};
 
 use crate::filtering::Filter;
 use crate::ordering::Sorter;
@@ -244,13 +244,13 @@ fn parse_query<'a, T, R>(
 ) -> Result<ResponseSet<&'a R>, MockError>
 where
     T: Send + Sync + RowSource<Item = R>,
-    R: Queryable + Sortable + IntoRow + 'static,
+    R: Filterable + Sortable + IntoRow + 'static,
     <T as RowSource>::Rows: Deref,
     for<'t> &'t <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'t R>,
 {
     let mut rb = ResponseSetBuilder::new();
-    let qr = QueryableRecord::<R>::new();
-    let sr = SortableRecord::<R>::new();
+    let qr = OperatorSet::<R>::new();
+    let sr = OrderingSet::<R>::new();
     let pairs = url.query_pairs();
     for (key, value) in pairs {
         match key.as_ref() {
@@ -294,7 +294,7 @@ pub struct Endpoint<T> {
 impl<T, R> Endpoint<T>
 where
     T: Send + Sync + RowSource<Item = R>,
-    R: Queryable + Sortable + 'static,
+    R: Filterable + Sortable + 'static,
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
@@ -306,7 +306,7 @@ where
 impl<T, R> Respond for Endpoint<T>
 where
     T: Send + Sync + RowSource<Item = R>,
-    R: Queryable + Sortable + IntoRow + 'static,
+    R: Filterable + Sortable + IntoRow + 'static,
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
@@ -371,7 +371,7 @@ pub struct NestedEndpoint<T> {
 impl<T, R> NestedEndpoint<T>
 where
     T: Send + Sync + RowSource<Item = R>,
-    R: Queryable + Sortable + 'static,
+    R: Filterable + Sortable + 'static,
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
@@ -386,7 +386,7 @@ where
 impl<T, R> Respond for NestedEndpoint<T>
 where
     T: Send + Sync + RowSource<Item = R>,
-    R: Queryable + Sortable + IntoRow + 'static,
+    R: Filterable + Sortable + IntoRow + 'static,
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
