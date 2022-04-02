@@ -32,8 +32,8 @@ impl ordering::Sortable for MyRecord {
     where
         Self: Sized,
     {
-        visitor.visit_sort("string_field", &StringField);
-        visitor.visit_sort("int_field", &IntField);
+        visitor.visit_sort("string_field", &StringField, &ordering::CompareClass);
+        visitor.visit_sort("int_field", &IntField, &ordering::CompareClass);
     }
 }
 
@@ -114,7 +114,7 @@ impl ordering::Sortable for MyRecord2 {
         Self: Sized,
     {
         visitor.visit_key_sort("foo", &FooField2, "string_field");
-        visitor.visit_sort("int_field", &IntField2);
+        visitor.visit_sort("int_field", &IntField2, &ordering::CompareClass);
     }
 }
 
@@ -229,8 +229,8 @@ impl ordering::Sortable for MyRecord3 {
     {
         visitor.visit_key_sort("foo", &FooField3, "int_field");
         visitor.visit_key_sort("bar", &BarField3, "foo");
-        visitor.visit_sort("int_field", &IntField3);
-        visitor.visit_sort("string_field", &StringField3);
+        visitor.visit_sort("int_field", &IntField3, &ordering::CompareClass);
+        visitor.visit_sort("string_field", &StringField3, &ordering::CompareClass);
     }
 }
 

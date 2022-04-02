@@ -74,27 +74,49 @@ pub enum SorterError {
     NoSort(String),
 }
 
-/// Something that can compare two values of another type `T`.
-///
-/// While [Ord] is a sensible trait for types that can have only one
-/// ordering, it needs to be generalised when a type can have multiple
-/// orderings according to some parameterisation. `Comparison` is just
-/// that generalisation.
-pub trait Comparison<T> {
-    //! Compare `a` and `b` returning an [Ordering] for them.
-    fn compare(&self, a: &T, b: &T) -> Ordering;
-}
-
-/// A [Comparison] defined for all types that are [Ord]
+/// A [Sorter] defined for all types that are [Ord].
 pub struct Compare;
 
-impl<T: Ord> Comparison<T> for Compare {
+impl<T: Ord> Sorter<T> for Compare {
     fn compare(&self, a: &T, b: &T) -> Ordering {
         a.cmp(b)
     }
 }
 
-/// Something that can apply a [Comparison] to a member of a type.
+/// A [Sorter] defined for all types that are [Ord], which reverses
+/// the natural order.
+pub struct ReverseCompare;
+
+impl<T: Ord> Sorter<T> for ReverseCompare {
+    fn compare(&self, a: &T, b: &T) -> Ordering {
+        b.cmp(a)
+    }
+}
+
+/// The [SorterClass] for [Compare]
+#[derive(Clone)]
+pub struct CompareClass;
+
+impl<T: Ord> SorterClass<T> for CompareClass
+{
+    fn instantiate(&self, reverse: bool) -> Box<dyn Sorter<T>> {
+        if reverse {
+            Box::new(ReverseCompare)
+        } else {
+            Box::new(Compare)
+        }
+    }
+}
+
+impl<T: Ord> SorterTypedClass<T> for CompareClass
+{
+    type Sorter = Compare;
+    fn instantiate(&self) -> Compare {
+        Compare
+    }
+}
+
+/// Something that can apply a [Sorter] to a member of a type.
 ///
 /// By asking the type to apply the operator, we can avoid cloning
 /// potentially large objects in more complex cases of nesting.  If we
@@ -108,7 +130,7 @@ pub trait Field<R>: Clone {
     type Value;
     /// Extract whichever member this [Field] obtains from `R`, from
     /// both `a` and `b` and apply `op` to the results.
-    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering;
+    fn apply_sorter<V: Sorter<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering;
 }
 
 /// Something which returns a particular member of an instance by reference.
@@ -141,7 +163,7 @@ pub trait Field<R>: Clone {
 /// let foo1 = Foo { a: 20 };
 /// let foo2 = Foo { a: 10 };
 /// assert_eq!(f_a.value(&foo1), &20i32);
-/// assert_eq!(f_a.apply_comparison(&Compare, &foo1, &foo2), Ordering::Greater);
+/// assert_eq!(f_a.apply_sorter(&Compare, &foo1, &foo2), Ordering::Greater);
 /// ```
 pub trait Accessor<R>: Clone {
     type Value;
@@ -164,19 +186,17 @@ where
     F: Accessor<R> + ReferenceField,
 {
     type Value = <F as Accessor<R>>::Value;
-    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
+    fn apply_sorter<V: Sorter<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
         op.compare(self.value(a), self.value(b))
     }
 }
 
-/// Something that defines an ordering on another type `R`.
+/// Something that can compare two values of another type `T`.
 ///
-/// This is identical in many respects to [Comparison], whereas the
-/// only standard implementer of [Comparison] simply defers to [Ord],
-/// a [Sorter] represents one of the complex sort orders created by
-/// this module. While the base method [compare()](Sorter::compare) is
-/// the same as in comparison, two additional helpers are provided to
-/// sort collections.
+/// While [Ord] is a sensible trait for types that can have only one
+/// ordering, it needs to be generalised when a type can have multiple
+/// orderings according to some parameterisation. `Sorter` is just
+/// that generalisation.
 pub trait Sorter<R> {
     fn compare(&self, a: &R, b: &R) -> Ordering;
 
@@ -191,23 +211,24 @@ pub trait Sorter<R> {
     }
 }
 
-struct SorterImpl<F> {
+struct SorterImpl<F, S> {
     field: F,
+    sorter: S
 }
 
-impl<F> SorterImpl<F> {
-    pub fn new(field: F) -> Self {
-        Self { field }
+impl<F, S> SorterImpl<F, S> {
+    pub fn new(field: F, sorter: S) -> Self {
+        Self { field, sorter }
     }
 }
 
-impl<R, F, T> Sorter<R> for SorterImpl<F>
+impl<R, F, T, S> Sorter<R> for SorterImpl<F, S>
 where
     F: Field<R, Value = T>,
-    T: Ord,
+    S: Sorter<T>,
 {
     fn compare(&self, a: &R, b: &R) -> Ordering {
-        self.field.apply_comparison(&Compare, a, b)
+        self.field.apply_sorter(&self.sorter, a, b)
     }
 }
 
@@ -230,7 +251,7 @@ where
     }
 }
 
-/// Something that can make a [Sorter].
+/// Something that can make a boxed [Sorter].
 ///
 /// This is the boxed object-like trait that is stored in an
 /// [OrderingSet]. When a specific sort is needed, it can be
@@ -240,27 +261,53 @@ pub trait SorterClass<R> {
     fn instantiate(&self, reverse: bool) -> Box<dyn Sorter<R>>;
 }
 
-struct SorterClassImpl<F> {
-    field: F,
+/// Something which can make a typed [Sorter].
+///
+/// This trait is used for any underlying [Sorter] that wants to be
+/// used directly on a field, for example as a replacement for
+/// [Compare]. It does not incur virtual function overhead or storage
+/// overhead, but it also cannot be stored in collections for a given
+/// type.
+pub trait SorterTypedClass<R>: Clone {
+    type Sorter: Sorter<R>;
+    fn instantiate(&self) -> Self::Sorter;
 }
 
-impl<F> SorterClassImpl<F> {
-    pub fn new(field: F) -> Self {
-        Self { field }
+#[derive(Clone)]
+struct SorterClassImpl<F, S> {
+    field: F,
+    sorter: S
+}
+
+impl<F, S> SorterClassImpl<F, S> {
+    pub fn new(field: F, sorter: S) -> Self {
+        Self { field, sorter }
     }
 }
 
-impl<R, F, T> SorterClass<R> for SorterClassImpl<F>
+impl<R, F, T, S> SorterClass<R> for SorterClassImpl<F, S>
 where
     F: Field<R, Value = T> + 'static,
-    T: Ord,
+    S: SorterTypedClass<T>,
+    <S as SorterTypedClass<T>>::Sorter: 'static
 {
     fn instantiate(&self, reverse: bool) -> Box<dyn Sorter<R>> {
         if reverse {
-            Box::new(Reverser::new(SorterImpl::new(self.field.clone())))
+            Box::new(Reverser::new(SorterImpl::new(self.field.clone(), self.sorter.instantiate())))
         } else {
-            Box::new(SorterImpl::new(self.field.clone()))
+            Box::new(SorterImpl::new(self.field.clone(), self.sorter.instantiate()))
         }
+    }
+}
+
+impl<R, F, T, S> SorterTypedClass<R> for SorterClassImpl<F, S>
+where
+    F: Field<R, Value = T> + 'static,
+    S: SorterTypedClass<T>
+{
+    type Sorter = SorterImpl<F, <S as SorterTypedClass<T>>::Sorter>;
+    fn instantiate(&self) -> Self::Sorter {
+        SorterImpl::new(self.field.clone(), self.sorter.instantiate())
     }
 }
 
@@ -272,10 +319,12 @@ where
 pub trait SortVisitor {
     type Target;
     /// Receive a basic sort on a given raw [Field], named `name`.
-    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    /// The comparison operator itself is given as `sort`. 
+    fn visit_sort<F, T, S>(&mut self, name: &str, field: &F, sort: &S)
     where
         F: Field<Self::Target, Value = T> + 'static,
-        T: Ord;
+        S: SorterTypedClass<T> + 'static,
+        <S as SorterTypedClass<T>>::Sorter: 'static;
 
     /// Receive a key sort on a member field which is itself [Sortable].
     ///
@@ -289,6 +338,10 @@ pub trait SortVisitor {
 }
 
 /// Something that can be sorted.
+///
+/// This is the central trait of this module. It has a derive macro
+/// which will automatically create all necessary supporting types
+/// using the markup on the type.
 pub trait Sortable {
     /// `visitor` will receive a callback for each sort that is
     /// defined for this type.
@@ -317,16 +370,18 @@ where
     U: Deref<Target = R>,
 {
     type Target = R;
-    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    fn visit_sort<F, T, S>(&mut self, name: &str, field: &F, sort: &S)
     where
         F: Field<R, Value = T> + 'static,
-        T: Ord,
+        S: SorterTypedClass<T> + 'static,
+        <S as SorterTypedClass<T>>::Sorter: 'static
     {
         self.parent.visit_sort(
             name,
             &WrappedField {
                 inner: field.clone(),
             },
+            sort
         );
     }
 
@@ -356,8 +411,8 @@ where
     U: Deref<Target = R>,
 {
     type Value = T;
-    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &U, b: &U) -> Ordering {
-        self.inner.apply_comparison(op, a, b)
+    fn apply_sorter<V: Sorter<Self::Value>>(&self, op: &V, a: &U, b: &U) -> Ordering {
+        self.inner.apply_sorter(op, a, b)
     }
 }
 
@@ -383,16 +438,18 @@ where
     P: SortVisitor<Target = Option<R>>,
 {
     type Target = R;
-    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    fn visit_sort<F, T, S>(&mut self, name: &str, field: &F, sort: &S)
     where
         F: Field<R, Value = T> + 'static,
-        T: Ord,
+        S: SorterTypedClass<T> + 'static,
+        <S as SorterTypedClass<T>>::Sorter: 'static
     {
         self.parent.visit_sort(
             name,
             &OptionField {
                 inner: field.clone(),
             },
+            sort
         );
     }
 
@@ -421,14 +478,14 @@ where
     F: Field<R, Value = T>,
 {
     type Value = T;
-    fn apply_comparison<V: Comparison<Self::Value>>(
+    fn apply_sorter<V: Sorter<Self::Value>>(
         &self,
         op: &V,
         a: &Option<R>,
         b: &Option<R>,
     ) -> Ordering {
         match (a.as_ref(), b.as_ref()) {
-            (Some(a), Some(b)) => self.inner.apply_comparison(&OptionOp { parent: op }, a, b),
+            (Some(a), Some(b)) => self.inner.apply_sorter(&OptionOp { parent: op }, a, b),
             (Some(_), None) => Ordering::Greater,
             (None, Some(_)) => Ordering::Less,
             (None, None) => Ordering::Equal,
@@ -440,9 +497,9 @@ struct OptionOp<'a, V> {
     parent: &'a V,
 }
 
-impl<'a, V, T> Comparison<T> for OptionOp<'a, V>
+impl<'a, V, T> Sorter<T> for OptionOp<'a, V>
 where
-    V: Comparison<T>,
+    V: Sorter<T>,
 {
     fn compare(&self, a: &T, b: &T) -> Ordering {
         self.parent.compare(a, b)
@@ -501,14 +558,15 @@ impl<R: Sortable + 'static> OrderingSet<R> {
 
 impl<R: Sortable> SortVisitor for OrderingSet<R> {
     type Target = R;
-    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    fn visit_sort<F, T, S>(&mut self, name: &str, field: &F, sort: &S)
     where
         F: Field<R, Value = T> + 'static,
-        T: Ord,
+        S: SorterTypedClass<T> + 'static,
+        <S as SorterTypedClass<T>>::Sorter: 'static
     {
         self.sorts.insert(
             name.to_string(),
-            Box::new(SorterClassImpl::new(field.clone())),
+            Box::new(SorterClassImpl::new(field.clone(), sort.clone())),
         );
     }
 
@@ -542,10 +600,11 @@ where
 {
     type Target = R;
 
-    fn visit_sort<F, T>(&mut self, name: &str, field: &F)
+    fn visit_sort<F, T, Srt>(&mut self, name: &str, field: &F, sort: &Srt)
     where
         F: Field<R, Value = T> + 'static,
-        T: Ord,
+        Srt: SorterTypedClass<T> + 'static,
+        <Srt as SorterTypedClass<T>>::Sorter: 'static
     {
         if name == self.key {
             self.parent.visit_sort(
@@ -554,6 +613,7 @@ where
                     outer: self.field.clone(),
                     inner: field.clone(),
                 },
+                sort
             );
         }
     }
@@ -590,27 +650,27 @@ where
     T: 'static,
 {
     type Value = U;
-    fn apply_comparison<V: Comparison<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
-        let n = NestedComparison {
+    fn apply_sorter<V: Sorter<Self::Value>>(&self, op: &V, a: &R, b: &R) -> Ordering {
+        let n = NestedSorter {
             inner: &self.inner,
             op,
         };
-        self.outer.apply_comparison(&n, a, b)
+        self.outer.apply_sorter(&n, a, b)
     }
 }
 
-struct NestedComparison<'a, 'b, F, P> {
+struct NestedSorter<'a, 'b, F, P> {
     inner: &'a F,
     op: &'b P,
 }
 
-impl<'a, 'b, F, P, T, U> Comparison<T> for NestedComparison<'a, 'b, F, P>
+impl<'a, 'b, F, P, T, U> Sorter<T> for NestedSorter<'a, 'b, F, P>
 where
     F: Field<T, Value = U>,
-    P: Comparison<U>,
+    P: Sorter<U>,
 {
     fn compare(&self, a: &T, b: &T) -> Ordering {
-        self.inner.apply_comparison(self.op, a, b)
+        self.inner.apply_sorter(self.op, a, b)
     }
 }
 

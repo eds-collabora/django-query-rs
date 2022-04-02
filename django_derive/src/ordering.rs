@@ -62,7 +62,7 @@ pub fn derive_sortable(input: syn::DeriveInput) -> pm2::TokenStream {
                         });
                     } else {
                         body.extend(quote::quote! {
-                            visitor.visit_sort(#fieldname, &#structname);
+                            visitor.visit_sort(#fieldname, &#structname, &::django_query::ordering::CompareClass);
                         });
                     }
                 }
