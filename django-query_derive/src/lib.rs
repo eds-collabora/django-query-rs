@@ -4,8 +4,9 @@ use proc_macro2 as pm2;
 
 mod attributes;
 mod filtering;
-mod ordering;
+mod persian_rug;
 mod row;
+mod sorting;
 
 /// Derive the `Filterable` trait, creating suitable `FilterClass`
 /// types.
@@ -79,7 +80,7 @@ pub fn filterable(input: TokenStream) -> TokenStream {
 pub fn sortable(input: TokenStream) -> TokenStream {
     let derive: syn::DeriveInput = syn::parse_macro_input!(input);
 
-    let res: pm2::TokenStream = ordering::derive_sortable(derive);
+    let res: pm2::TokenStream = sorting::derive_sortable(derive);
 
     res.into()
 }
@@ -109,6 +110,143 @@ pub fn into_row(input: TokenStream) -> TokenStream {
     let derive: syn::DeriveInput = syn::parse_macro_input!(input);
 
     let res: pm2::TokenStream = row::derive_into_row(derive);
+
+    res.into()
+}
+
+/// Derive the `IntoRowWithContext` trait for `persian-rug` types.
+///
+/// This is only implemented for structs with named fields. All fields
+/// will be included in the output by default, which means they must
+/// have types which implement `IntoCellValue`. The annotations for
+/// this derive macro use the `django` attribute, which has the
+/// following significant options here:
+///
+/// - `#[django(rename="new_name")]` Expose the annotated member in
+///    the output `new_name instead of using its name in the source code.
+///
+/// - `#[django(exclude)]` Do not include the annotated member in any
+///   output.
+///
+/// - `#[django(foreign_key="field_name")]` The field has a type which
+///   is itself `IntoRow`. Rather than requiring the field's type to
+///   implement `IntoCellValue`, instead take the value of the field
+///   from the cell called `field_name` in the field's own type's
+///   output row.
+///
+/// The struct itself must also be annotated with the `django`
+/// attribute, which gives the `persian-rug` constraints to apply to
+/// to each derived `impl`:
+///
+/// - `#[django(persian_rug(context=Rug))]` The persian-rug
+///   context type for this type is `Rug`.
+///
+/// - `#[django(persian_rug(context=C, access(Foo<C>)))]` The
+///   persian-rug context type is the template parameter `C`. The
+///   context must provide access to `Foo<C>`.
+#[proc_macro_derive(IntoRowWithPersianRug, attributes(django))]
+pub fn into_row_with_persian_rug(input: TokenStream) -> TokenStream {
+    let derive: syn::DeriveInput = syn::parse_macro_input!(input);
+
+    let res: pm2::TokenStream = persian_rug::derive_into_row_with_persian_rug(derive);
+
+    res.into()
+}
+
+/// Derive the `SortableWithContext` trait for `persian-rug` types.
+///
+/// This is only implemented for structs with named fields. No fields
+/// will be available to use as sort orders, unless there are
+/// annotations to indicate otherwise. The annotations use the
+/// `django` attribute, which has the following significant options
+/// here:
+///
+/// - `#[django(rename="new_name")]` Expose the annotated member for
+///   sorting as `new_name instead of using its name in the source
+///   code.
+///
+/// - `#[django(sort)]` The field, which must be [Ord], will be
+///   exposed as a sort order for the enclosing type. The ordering
+///   is taken directly from [Ord].
+///
+/// - `#[django(sort="name","age")]` The field has a type which is
+///   itself `Sortable`. Expose this field as defining a sort order of
+///   the same name, and When sorting by this field make the order
+///   defined by the field's own member `name`, and then by its own
+///   member `age` as a secondary sort.
+///
+/// The struct itself must also be annotated with the `django`
+/// attribute, which gives the `persian-rug` constraints to apply to
+/// to each derived `impl`:
+///
+/// - `#[django(persian_rug(context=Rug))]` The persian-rug
+///   context type for this type is `Rug`.
+///
+/// - `#[django(persian_rug(context=C, access(Foo<C>)))]` The
+///   persian-rug context type is the template parameter `C`. The
+///   context must provide access to `Foo<C>`.
+#[proc_macro_derive(SortableWithPersianRug, attributes(django))]
+pub fn sortable_with_persian_rug(input: TokenStream) -> TokenStream {
+    let derive: syn::DeriveInput = syn::parse_macro_input!(input);
+
+    let res: pm2::TokenStream = persian_rug::derive_sortable_with_persian_rug(derive);
+
+    res.into()
+}
+
+/// Derive the `FilterableWithContext` trait for `persian-rug` types.
+///
+/// This is only implemented for structs with named fields. All fields
+/// will be exposed, with a default operator of `exact` unless annotated
+/// to indicate otherwise. The field annotations use the `django` attribute,
+/// which has the following options:
+///
+/// - `#[django(rename="new_name")]` Expose the annotated member for
+///   filtering as `new_name instead of using its name in the source
+///   code.
+///
+/// - `#[django(default_op=iexact)]` Set the default operator, which
+///   is applied when the field is referred to directly to be `iexact`,
+///   where `iexact` can be replaced with any of the built-in operators
+///   included in `django-query`.
+///
+/// - `#[django(default_fun=my_crate::MyOperatorClass)]` Set the
+///   default operator to be the custom type
+///   `my_crate::MyOperatorClass`, which must implement
+///   `OperatorClass`.
+///
+/// - `#[django(exclude)]` Do not expose this field, it cannot be used
+///   in filtering.
+///
+/// - `#[django(traverse)]` This type of this field is itself `Filterable`
+///   and nested filters onto its members are permitted via the double
+///   underscore syntax that Django uses.
+///
+/// - `#[django(op(in, icontains))]` In addition to the default operator,
+///   this field can also be filtered on using `in` and `icontains`, using
+///   double underscores to separate the operator from the field name.
+///
+/// - `#[django(op(foo=my_crate::MyOperatorClass))]` This field has a
+///   custom filter operator `foo` which can be appended to its name
+///   with double underscores, and which when used, creates a filter
+///   using `my_crate::MyOperatorClass`, which must itself be an
+///   instance of `OperatorClass`.
+///
+/// The struct itself must also be annotated with the `django`
+/// attribute, which gives the `persian-rug` constraints to apply to
+/// to each derived `impl`:
+///
+/// - `#[django(persian_rug(context=Rug))]` The persian-rug
+///   context type for this type is `Rug`.
+///
+/// - `#[django(persian_rug(context=C, access(Foo<C>)))]` The
+///   persian-rug context type is the template parameter `C`. The
+///   context must provide access to `Foo<C>`.
+#[proc_macro_derive(FilterableWithPersianRug, attributes(django))]
+pub fn filterable_with_persian_rug(input: TokenStream) -> TokenStream {
+    let derive: syn::DeriveInput = syn::parse_macro_input!(input);
+
+    let res: pm2::TokenStream = persian_rug::derive_filterable_with_persian_rug(derive);
 
     res.into()
 }

@@ -13,7 +13,8 @@ pub fn derive_into_row(input: syn::DeriveInput) -> pm2::TokenStream {
     let mut cells = pm2::TokenStream::new();
     let mut cols = pm2::TokenStream::new();
 
-    let (generics, ty_generics, wc) = generics.split_for_impl();
+    let full_generics = generics.clone();
+    let (_, ty_generics, wc) = generics.split_for_impl();
 
     if let syn::Data::Struct(s) = data {
         if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
@@ -49,7 +50,7 @@ pub fn derive_into_row(input: syn::DeriveInput) -> pm2::TokenStream {
                 if !excluded {
                     if let Some(key) = key {
                         cells.extend(quote::quote! {
-                            visitor.visit_value(#fieldname, <#fieldtype as ::django_query::row::AsForeignKey>::as_foreign_key(&self.#fieldid, #key));
+                            visitor.visit_value(#fieldname, ::django_query::row::CellReducer::reduce_to_cell(&<#fieldtype as ::django_query::row::AsForeignKey>::get_cell_reducer(#key), &self.#fieldid));
                         });
                     } else {
                         cells.extend(quote::quote! {
@@ -76,10 +77,21 @@ pub fn derive_into_row(input: syn::DeriveInput) -> pm2::TokenStream {
         .to_compile_error();
     }
 
+    let generics_with_lifespan = if full_generics.params.is_empty() {
+        syn::parse_quote! { <'r> }
+    } else {
+        let mut g = full_generics;
+        g.params
+            .push(syn::GenericParam::Lifetime(syn::LifetimeDef::new(
+                syn::Lifetime::new("'r", pm2::Span::call_site()),
+            )));
+        g
+    };
+
     let res = quote::quote! {
         const _: () = {
             #[automatically_derived]
-            impl #generics ::django_query::IntoRow for #ident #ty_generics #wc {
+            impl #generics_with_lifespan ::django_query::row::SelfSerializer<'r> for #ident #ty_generics #wc {
                 fn accept_cell_visitor<V: ::django_query::row::CellVisitor>(&self, visitor: &mut V)
                 {
                     #cells

@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::str::FromStr;
 
 use django_query::filtering::*;
-use django_query::*;
 
 struct MyRecord<T> {
     string_field: String,
@@ -14,7 +13,7 @@ struct MyRecord<T> {
 #[derive(Clone)]
 struct MyStringField;
 
-impl<T> Member<MyRecord<T>> for MyStringField
+impl<'a, T> Member<'a, MyRecord<T>> for MyStringField
 where
     T: Clone,
 {
@@ -22,13 +21,17 @@ where
     fn apply<O: Operator<String>>(&self, op: &O, data: &MyRecord<T>) -> bool {
         data.string_field.apply(op)
     }
-    fn accept_visitor<V: MemberVisitor<Self, MyRecord<T>, Self::Value>>(&self, _visitor: &mut V) {}
+    fn accept_visitor<V: MemberVisitor<'a, Self, MyRecord<T>, Self::Value>>(
+        &self,
+        _visitor: &mut V,
+    ) {
+    }
 }
 
 #[derive(Clone)]
 struct MyIntField;
 
-impl<T> Member<MyRecord<T>> for MyIntField
+impl<'a, T> Member<'a, MyRecord<T>> for MyIntField
 where
     T: Clone,
 {
@@ -36,13 +39,17 @@ where
     fn apply<O: Operator<i32>>(&self, op: &O, data: &MyRecord<T>) -> bool {
         data.int_field.apply(op)
     }
-    fn accept_visitor<V: MemberVisitor<Self, MyRecord<T>, Self::Value>>(&self, _visitor: &mut V) {}
+    fn accept_visitor<V: MemberVisitor<'a, Self, MyRecord<T>, Self::Value>>(
+        &self,
+        _visitor: &mut V,
+    ) {
+    }
 }
 
 #[derive(Clone)]
 struct MyTField;
 
-impl<T> Member<MyRecord<T>> for MyTField
+impl<'a, T> Member<'a, MyRecord<T>> for MyTField
 where
     T: Clone + Operable,
 {
@@ -50,25 +57,29 @@ where
     fn apply<O: Operator<<T as Operable>::Base>>(&self, op: &O, data: &MyRecord<T>) -> bool {
         data.foo.apply(op)
     }
-    fn accept_visitor<V: MemberVisitor<Self, MyRecord<T>, Self::Value>>(&self, _visitor: &mut V) {}
+    fn accept_visitor<V: MemberVisitor<'a, Self, MyRecord<T>, Self::Value>>(
+        &self,
+        _visitor: &mut V,
+    ) {
+    }
 }
 
 struct MyMeta;
 
-impl<T> Meta<MyRecord<T>> for MyMeta
+impl<'a, T> Meta<'a, MyRecord<T>> for MyMeta
 where
     T: Operable + Clone,
     <T as Operable>::Base: Eq + FromStr + 'static,
     <<T as Operable>::Base as FromStr>::Err: std::error::Error + Debug + Send + Sync,
 {
-    fn accept_visitor<V: MetaVisitor<MyRecord<T>>>(&self, visitor: &mut V) {
-        visitor.visit_member("string_field", &MyStringField, operators::Eq);
-        visitor.visit_member("int_field", &MyIntField, operators::Eq);
-        visitor.visit_member("foo", &MyTField, operators::Eq);
+    fn accept_visitor<V: MetaVisitor<'a, MyRecord<T>>>(&self, visitor: &mut V) {
+        visitor.visit_member("string_field", &MyStringField, ops::Exact);
+        visitor.visit_member("int_field", &MyIntField, ops::Exact);
+        visitor.visit_member("foo", &MyTField, ops::Exact);
     }
 }
 
-impl<T> Filterable for MyRecord<T>
+impl<'a, T> Filterable<'a> for MyRecord<T>
 where
     T: Clone + Operable + 'static,
     <T as Operable>::Base: Eq + FromStr + 'static,
@@ -85,11 +96,11 @@ struct TestFilter<F, O> {
     operator: O,
 }
 
-impl<F, O, T, R> Filter<R> for TestFilter<F, O>
+impl<'a, F, O, R> Filter<R> for TestFilter<F, O>
 where
-    F: Member<R, Value = T>,
-    O: Operator<<T as Operable>::Base>,
-    T: Operable,
+    F: Member<'a, R>,
+    O: Operator<<<F as Member<'a, R>>::Value as Operable>::Base>,
+    <F as Member<'a, R>>::Value: Operable,
 {
     fn filter_one(&self, data: &R) -> bool {
         self.field.apply(&self.operator, data)
@@ -104,7 +115,7 @@ fn basic() {
         foo: "hello",
     };
     let sfield = MyStringField;
-    let opcls = operators::Eq;
+    let opcls = ops::Exact;
     let op = OperatorClass::<String>::instantiate(&opcls, "test").unwrap();
     let filter = TestFilter {
         field: sfield,
@@ -121,7 +132,7 @@ fn generic() {
         foo: 5,
     };
     let sfield = MyTField;
-    let opcls = operators::Eq;
+    let opcls = ops::Exact;
     let op = OperatorClass::<i32>::instantiate(&opcls, "5").unwrap();
     let filter = TestFilter {
         field: sfield,
@@ -156,6 +167,7 @@ fn using_trait() {
     assert!(filter.filter_one(&r));
 }
 
+// FIXME: what if T had a 'f lifetime too rather than static?
 #[derive(Filterable)]
 struct MyRecord2<T>
 where
@@ -166,7 +178,7 @@ where
     #[django(rename = "MYSTRING")]
     string_field: String,
     int_field: i32,
-    #[django(rename="bar", op(in=operators::In))]
+    #[django(rename="bar", op(in=ops::In))]
     foo: T,
 }
 
@@ -310,7 +322,7 @@ where
         op(endswith)
     )]
     string_field: String,
-    #[django(default_fun = operators::In, op(exact,lt,lte,gt,gte=operators::GreaterEq))]
+    #[django(default_fun = ops::In, op(exact,lt,lte,gt,gte=ops::GreaterEq))]
     int_field: i32,
     #[django(rename = "bar", op(in))]
     foo: T,
@@ -485,7 +497,7 @@ fn vector_nesting() {
 
 #[test]
 fn test_print() {
-    use django_query::{filtering::print_filters, Filterable};
+    use django_query::filtering::{print_filters, Filterable};
 
     #[derive(Filterable)]
     struct Foo {

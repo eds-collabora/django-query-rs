@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 
 use proc_macro2 as pm2;
 
+use super::helpers::get_persian_rug_constraints;
 use crate::attributes::{DjangoFiltering, DjangoMeta};
 
-pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
+pub fn derive_filterable_with_persian_rug(input: syn::DeriveInput) -> pm2::TokenStream {
     let syn::DeriveInput {
+        attrs,
         ident,
         data,
         generics,
@@ -67,16 +69,48 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
 
     let (_, ty_generics, wc) = generics.split_for_impl();
 
+    let (context, used_types) = match get_persian_rug_constraints(&attrs) {
+        Ok(v) => v,
+        Err(e) => {
+            return e.to_compile_error();
+        }
+    };
+
     let generics_with_lifespan = if full_generics.params.is_empty() {
-        syn::parse_quote! { <'f> }
+        syn::parse_quote! { <'f, A> }
     } else {
         let mut g = full_generics;
         g.params
             .push(syn::GenericParam::Lifetime(syn::LifetimeDef::new(
                 syn::Lifetime::new("'f", pm2::Span::call_site()),
             )));
+        g.params
+            .push(syn::GenericParam::Type(syn::parse_quote! { A }));
         g
     };
+
+    let mut wc = if let Some(wc) = wc {
+        wc.clone()
+    } else {
+        syn::WhereClause {
+            where_token: Default::default(),
+            predicates: syn::punctuated::Punctuated::new(),
+        }
+    };
+
+    wc.predicates.push(syn::parse_quote! {
+        A: ::persian_rug::Accessor<Context = #context> + 'f
+    });
+
+    let mut constraints = pm2::TokenStream::new();
+    constraints.extend(quote::quote! {
+        context = #context,
+    });
+    let used_types: syn::punctuated::Punctuated<syn::Type, syn::Token![,]> =
+        used_types.into_iter().collect();
+    constraints.extend(quote::quote! {
+        access(#used_types)
+    });
 
     if let syn::Data::Struct(s) = data {
         if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
@@ -162,9 +196,13 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
 
                 structs.extend(quote::quote! {
                     #[derive(Clone)]
-                    struct #structname;
+                    struct #structname<A> {
+                        access: A
+                    }
+
                     #[automatically_derived]
-                    impl #generics_with_lifespan ::django_query::filtering::Field<#ident #ty_generics> for #structname #wc {
+                    #[persian_rug::constraints(#constraints)]
+                    impl #generics_with_lifespan ::django_query::filtering::Field<#ident #ty_generics> for #structname<A> #wc {
                         type Value = #fieldtype;
                         fn apply<O: ::django_query::filtering::Operator<Self::Value>>(&self, op: &O, data: &#ident #ty_generics) -> bool {
                             op.apply(&data.#fieldid)
@@ -174,12 +212,19 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
 
                 if traversed {
                     body.extend(quote::quote! {
-                        visitor.visit_record(#fieldname, &#structname, &<#fieldtype as ::django_query::filtering::Filterable<'f>>::get_meta());
+                        visitor.visit_record(
+                            #fieldname,
+                            &#structname {
+                                access: self.access.clone()
+                            },
+                            &<#fieldtype as ::django_query::filtering::FilterableWithContext<'f, A>>::get_meta(self.access.clone())
+                        );
                     });
                 } else {
                     structs.extend(quote::quote! {
                         #[automatically_derived]
-                        impl #generics_with_lifespan ::django_query::filtering::Member<'f, #ident #ty_generics> for #structname #wc {
+                        #[persian_rug::constraints(#constraints)]
+                        impl #generics_with_lifespan ::django_query::filtering::Member<'f, #ident #ty_generics> for #structname<A> #wc {
                             type Value = #fieldtype;
                             fn apply<O: ::django_query::filtering::Operator<<Self::Value as ::django_query::filtering::Operable>::Base>>(&self, op: &O, data: &#ident #ty_generics) -> bool {
                                 <Self::Value as ::django_query::filtering::Operable>::apply(&data.#fieldid, op)
@@ -197,14 +242,18 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
                     };
 
                     body.extend(quote::quote! {
-                        visitor.visit_member(#fieldname, &#structname, #defop);
+                        visitor.visit_member(#fieldname, &#structname { access: self.access.clone() }, #defop);
                     });
                 }
             }
 
             structs.extend(quote::quote! {
-                pub struct Meta;
-                impl #generics_with_lifespan ::django_query::filtering::Meta<'f, #ident #ty_generics> for Meta #wc {
+                pub struct Meta<A: ::persian_rug::Accessor> {
+                    access: A
+                }
+
+                #[persian_rug::constraints(#constraints)]
+                impl #generics_with_lifespan ::django_query::filtering::Meta<'f, #ident #ty_generics> for Meta<A> #wc {
                     fn accept_visitor<V: ::django_query::filtering::MetaVisitor<'f, #ident #ty_generics>>(&self, visitor: &mut V) where Self: Sized {
                         #body
                     }
@@ -213,14 +262,14 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
         } else {
             return syn::Error::new(
                 ident.span(),
-                "Filterable can only be derived for structs with named fields.",
+                "FilterableWithPersianRug can only be derived for structs with named fields.",
             )
             .to_compile_error();
         }
     } else {
         return syn::Error::new(
             ident.span(),
-            "Filterable can only be derived for structs with named fields.",
+            "FilterableWithPersianRug can only be derived for structs with named fields.",
         )
         .to_compile_error();
     }
@@ -229,14 +278,17 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
         const _: () = {
             #structs
             #[automatically_derived]
-            impl #generics_with_lifespan ::django_query::filtering::Filterable<'f> for #ident #ty_generics #wc {
-                type Meta = Meta;
-                fn get_meta() -> Self::Meta {
-                    Meta
+            #[persian_rug::constraints(#constraints)]
+            impl #generics_with_lifespan ::django_query::filtering::FilterableWithContext<'f, A> for #ident #ty_generics #wc {
+                type Meta = Meta<A>;
+                fn get_meta(access: A) -> Self::Meta {
+                    Meta { access }
                 }
             }
         };
     };
+
+    //println!("Res: {}", res);
 
     res
 }
