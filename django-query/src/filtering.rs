@@ -38,19 +38,17 @@
 //! `baz` one integer is less than 5".
 //!
 //! The main trait in this module is [Filterable] which has an
-//! associated derive macro. By deriving [Filterable] it becomes
-//! possible to construct a [OperatorSet] for a type. This can be
-//! given query strings, and will convert them into boxed [Filter]
-//! objects. The virtual function call overhead is right at the top
-//! here, in the call to the filter object, so where possible
-//! filtering entire vectors at a time is preferable to reduce
-//! overheads (since each call into the boxed [Filter] incurs
-//! overhead, but only one such call is needed to filter an entire
-//! collection.)
+//! associated derive macro. Deriving [Filterable] means it's possible
+//! to construct a [OperatorSet] for a type. This can be given query
+//! strings, and will convert them into boxed [Filter] objects. The
+//! virtual function call overhead is right at the top here, in the
+//! call to the filter object, so where possible filtering entire
+//! vectors at a time is preferable to reduce overheads (since each
+//! call into the boxed [Filter] incurs overhead, but only one such
+//! call is needed to filter an entire collection.)
 //!
 //! Example
 //! ```rust
-//! use std::sync::Arc;
 //! use django_query::{Filterable, OperatorSet};
 //!
 //! #[derive(Filterable)]
