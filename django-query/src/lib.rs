@@ -69,7 +69,7 @@
 //!    ]);
 //!
 //!    Mock::given(matchers::method("GET"))
-//!         .respond_with(Endpoint::new(bars))
+//!         .respond_with(Endpoint::new(bars, Some(&server.uri())))
 //!         .mount(&server)
 //!         .await;
 //!

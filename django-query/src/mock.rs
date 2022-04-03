@@ -1,5 +1,61 @@
 #![cfg(feature = "mock")]
+//! Create Django-style endpoints using [wiremock].
+//!
+//! This module provides [Endpoint] which can function as an endpoint
+//! in wiremock (it implements [Respond]). It will dissect any
+//! URLs given to it, pulling out:
+//! - pagination requests (`limit`, `offset`) which it handles itself.
+//! - sort requests (`ordering`) which it uses [OrderingSet] to parse.
+//! - filtering requests which it uses [OperatorSet] to parse.
+//!
+//! Finally, it uses [IntoRow] to generate the response table as JSON,
+//! in a similar way to Django.
+//!
+//! Example
+//! ```rust
+//! use django_query::{IntoRow, Filterable, Sortable, mock::Endpoint};
+//! use std::sync::Arc;
+//! use wiremock::{Mock, MockServer, matchers, http::Url};
+//!
+//! #[derive(IntoRow, Filterable, Sortable)]
+//! struct Foo {
+//!   #[django(sort, op(in, lt, gt))]
+//!   a: i32
+//! }
+//!
+//! let foos = (0..20i32).into_iter().map(|a| Foo { a }).collect::<Vec<_>>();
+//!
+//! tokio_test::block_on( async {
+//!    let server = MockServer::start().await;
+//!
+//!    Mock::given(matchers::method("GET"))
+//!         .respond_with(Endpoint::new(Arc::new(foos), Some(&server.uri())))
+//!         .mount(&server)
+//!         .await;
+//!
+//!    let u = format!("{}?limit=1&offset=5&a__lt=10&ordering=-a", server.uri());
+//!    let body: serde_json::Value = reqwest::get(&u)
+//!        .await
+//!        .expect("error getting response")
+//!        .json()
+//!        .await
+//!        .expect("error parsing response");
+//!
+//!    let prev = format!("{}/?limit=1&offset=4&a__lt=10&ordering=-a", server.uri());
+//!    let next = format!("{}/?limit=1&offset=6&a__lt=10&ordering=-a", server.uri());
+//!    assert_eq!(body, serde_json::json!{
+//!      {
+//!        "count": 1,
+//!        "next": next,
+//!        "prev": prev,
+//!        "results": [
+//!          { "a": 4 }
+//!        ]
+//!      }
+//!    });
+//! });
 
+//! ```
 use core::cmp::min;
 use core::fmt::Debug;
 use core::ops::Deref;
@@ -31,7 +87,7 @@ pub enum MockError {
     BadSort(#[from] crate::ordering::SorterError),
 }
 
-pub struct ResponseSet<T> {
+struct ResponseSet<T> {
     contents: Vec<T>,
     next: Option<String>,
     prev: Option<String>,
@@ -184,7 +240,7 @@ impl<T> ResponseSetBuilder<T> {
     }
 }
 
-pub fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
+fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
     let mut new_url = url.clone();
 
     let mut new_pairs = new_url.query_pairs_mut();
@@ -212,13 +268,37 @@ pub fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
     new_url
 }
 
+/// Something which can provide a collection of objects on demand.
+///
+/// This trait generalises the idea of "something that can provide
+/// data to query".  It's important to note that the data it contains
+/// is owned, and is therefore guaranteed to survive for as long as
+/// needed, in particular for the life of the query. For correctness,
+/// it is expected that the returned data is a snapshot that will not
+/// change.
+///
+/// The reason for this definition is to make it possible to return
+/// views of data without copying, where that makes sense. For example
+/// using `Arc<Vec<T>>` as a `RowSource` does not entail copying data.
+/// It's possible to define mutable types that generate snapshots on
+/// demand which also implement `RowSource`, if you need your test
+/// data to evolve.
+///
+/// The main drawback of this definition is that supporting bare
+/// containers becomes very expensive. `Vec<T>` is defined to be a
+/// `RowSource`, but the entire [Vec] must be copied for every call to
+/// [get](RowSource::get).
 pub trait RowSource
 where
     Self::Rows: Deref,
     for<'a> &'a <Self::Rows as Deref>::Target: IntoIterator<Item = &'a Self::Item>,
 {
+    /// The type of the objects this provides.
     type Item;
+    /// The type of the collection this provides.
     type Rows;
+    /// Return a new, owned collection of objects, which should now
+    /// remain immutable.
     fn get(&self) -> Self::Rows;
 }
 
@@ -248,20 +328,25 @@ where
     <T as RowSource>::Rows: Deref,
     for<'t> &'t <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'t R>,
 {
+    println!("Parse query");
     let mut rb = ResponseSetBuilder::new();
     let qr = OperatorSet::<R>::new();
     let sr = OrderingSet::<R>::new();
     let pairs = url.query_pairs();
+    println!("Getting pairs from url {:?} - {}", url, url);
     for (key, value) in pairs {
+        println!("Processing qp {}={}", key,value);
         match key.as_ref() {
             "ordering" => {
                 rb.order_by(sr.create_sort(&*value)?);
             }
             "offset" => {
+                println!("Saw offset {}", value.as_ref());
                 let v = usize::from_str(value.as_ref())?;
                 rb.offset(v);
             }
             "limit" => {
+                println!("Saw limit {}", value.as_ref());
                 let v = usize::from_str(value.as_ref())?;
                 rb.limit(v);
             }
@@ -287,8 +372,22 @@ where
     ))
 }
 
+/// A Django-style Wiremock endpoint for a collection of suitable objects.
+///
+/// This is the central struct in this crate. `Endpoint` implements
+/// [Respond](wiremock::Respond and so can be mounted directly into a
+/// [MockServer](wiremock::MockServer). It contains a [RowSource]
+/// which it will query for a starting set of data.
+///
+/// It will then filter that data using the URL, using the
+/// [Filterable] trait on the objects; then it will sort the data
+/// using the [Sortable] trait on the objects; then it will clip the
+/// results to the selected page using `limit` and `offset`;finally it
+/// will convert the data to JSON using the [IntoRow] trait on the
+/// objects.
 pub struct Endpoint<T> {
     row_source: T,
+    base_uri: Option<Url>
 }
 
 impl<T, R> Endpoint<T>
@@ -298,8 +397,21 @@ where
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
-    pub fn new(row_source: T) -> Self {
-        Self { row_source }
+    /// Create a new endpoint.
+    ///
+    /// `row_source` is where the data comes from. `base_uri`, if provided, should
+    /// be the wiremock server URI.
+    ///
+    /// `base_uri` is only required because wiremock mangles the
+    /// request URL such that it's not possible to inspect it to see
+    /// how to give out other URLs on the same server; the port
+    /// number, which is usually random when mocking, is lost. Since
+    /// Django includes full absolute URLs for the next and preceding
+    /// pages for a query, mimicking this is impossible without more
+    /// information (i.e. including usable URLs for the next page
+    /// within the query response is impossible).
+    pub fn new(row_source: T, base_uri: Option<&str>) -> Self {
+        Self { row_source, base_uri: base_uri.map(|x| Url::parse(x).unwrap()) }
     }
 }
 
@@ -311,9 +423,16 @@ where
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
-        trace!("Request URL: {}", request.url);
         let data: <T as RowSource>::Rows = self.row_source.get();
-        let body = parse_query::<T, R>(&request.url, (&data).into_iter());
+        // All of this is to work around the mess in wiremock that means
+        // request.uri is inaccurate, and can't be used.
+        let mut u = request.url.clone();
+        if let Some(ref base) = self.base_uri {
+            u.set_host(base.host_str()).unwrap();
+            u.set_scheme(base.scheme()).unwrap();
+            u.set_port(base.port()).unwrap();
+        }
+        let body = parse_query::<T, R>(&u, (&data).into_iter());
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
             Err(e) => {
@@ -330,6 +449,37 @@ fn replace_into(target: &str, cap: &Captures<'_>) -> String {
     res
 }
 
+#[allow(rustdoc::bare_urls)]
+/// Use a regex to match a query path, mutating both the path and query string.
+///
+/// Some Django-based services support nested endpoints, where the
+/// path of the URL might look like:
+///
+///    <http://example.com/womble/6/neighbours>
+///
+/// Since our parsing operates on the query parameters, we'd like to rewrite this
+/// URL before we process it, to fit the remainder of the pipeline better. For
+/// example we might want to create:
+///
+///    <http://example.com/neighbours?womble=6>
+///
+/// from the preceding URL.
+///
+/// Example:
+/// ```rust
+/// use wiremock::http::Url;
+/// use django_query::mock::UrlTransform;
+///
+/// let ut = UrlTransform::new(r"^/base/foos/(\d+)/(.+)$",
+///                            r"/base/$2",
+///                            vec![("foo", "$1")]);
+/// let u = Url::parse("http://example.com/base/foos/1214/bars?ordering=name").unwrap();
+/// let t = Url::parse("http://example.com/base/bars?ordering=name&foo=1214").unwrap();
+/// assert_eq!(ut.transform(&u), t);
+/// ```
+///
+/// This is intended for use with [NestedEndpoint], which differs from
+/// [Endpoint] only in applying a [UrlTransform] to its input.
 pub struct UrlTransform {
     regex: Regex,
     path: String,
@@ -363,6 +513,24 @@ impl UrlTransform {
     }
 }
 
+/// A Django nested route.
+///
+/// A nested route in Django is a way of specifying that a particular filter field must
+/// be present when querying for a particular object type, and that it the filter type
+/// must be exact match. So for example, if all objects of type `Foo` have a reference to
+/// a `Bar`, and its too expensive or undesirable to query for `Foo`s without specifying
+/// which `Bar` they come from, then you can express this in Django as a nested route:
+///
+///   ``http://example.com/bars/my-bar-id/foos``
+/// 
+/// where in order to ask any question about `Foo`s you must first
+/// identify a particular associated `Bar`.
+///
+/// Since the django-query crate operates on query parameters, the
+/// simplest way to handle this is to use a [UrlTransform] to convert
+/// any relevant parts of the path into query parameters as required,
+/// which is all this type does.  It is otherwise identical to
+/// [Endpoint].
 pub struct NestedEndpoint<T> {
     transform: UrlTransform,
     row_source: T,
@@ -375,6 +543,11 @@ where
     <T as RowSource>::Rows: Deref,
     for<'a> &'a <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'a R>,
 {
+    /// Create a new NestedEndpoint.
+    ///
+    /// The given [UrlTransform] will be applied to every incoming
+    /// request. The `row_source` will be used to gather the data to
+    /// respond to the rewritten request.
     pub fn new(transform: UrlTransform, row_source: T) -> Self {
         Self {
             transform,
