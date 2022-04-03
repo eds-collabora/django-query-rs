@@ -109,6 +109,6 @@ pub mod row;
 
 pub use crate::filtering::{Filterable, OperatorSet};
 pub use crate::operators::Scalar;
-pub use crate::ordering::{Sortable, OrderingSet};
+pub use crate::ordering::{OrderingSet, Sortable};
 pub use crate::row::{IntoCellValue, IntoRow, StringCellValue};
-pub use django_derive::{IntoRow, Filterable, Sortable};
+pub use django_derive::{Filterable, IntoRow, Sortable};

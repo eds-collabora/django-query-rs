@@ -97,8 +97,7 @@ impl<T: Ord> Sorter<T> for ReverseCompare {
 #[derive(Clone)]
 pub struct CompareClass;
 
-impl<T: Ord> SorterClass<T> for CompareClass
-{
+impl<T: Ord> SorterClass<T> for CompareClass {
     fn instantiate(&self, reverse: bool) -> Box<dyn Sorter<T>> {
         if reverse {
             Box::new(ReverseCompare)
@@ -108,8 +107,7 @@ impl<T: Ord> SorterClass<T> for CompareClass
     }
 }
 
-impl<T: Ord> SorterTypedClass<T> for CompareClass
-{
+impl<T: Ord> SorterTypedClass<T> for CompareClass {
     type Sorter = Compare;
     fn instantiate(&self) -> Compare {
         Compare
@@ -213,7 +211,7 @@ pub trait Sorter<R> {
 
 struct SorterImpl<F, S> {
     field: F,
-    sorter: S
+    sorter: S,
 }
 
 impl<F, S> SorterImpl<F, S> {
@@ -276,7 +274,7 @@ pub trait SorterTypedClass<R>: Clone {
 #[derive(Clone)]
 struct SorterClassImpl<F, S> {
     field: F,
-    sorter: S
+    sorter: S,
 }
 
 impl<F, S> SorterClassImpl<F, S> {
@@ -289,13 +287,19 @@ impl<R, F, T, S> SorterClass<R> for SorterClassImpl<F, S>
 where
     F: Field<R, Value = T> + 'static,
     S: SorterTypedClass<T>,
-    <S as SorterTypedClass<T>>::Sorter: 'static
+    <S as SorterTypedClass<T>>::Sorter: 'static,
 {
     fn instantiate(&self, reverse: bool) -> Box<dyn Sorter<R>> {
         if reverse {
-            Box::new(Reverser::new(SorterImpl::new(self.field.clone(), self.sorter.instantiate())))
+            Box::new(Reverser::new(SorterImpl::new(
+                self.field.clone(),
+                self.sorter.instantiate(),
+            )))
         } else {
-            Box::new(SorterImpl::new(self.field.clone(), self.sorter.instantiate()))
+            Box::new(SorterImpl::new(
+                self.field.clone(),
+                self.sorter.instantiate(),
+            ))
         }
     }
 }
@@ -303,7 +307,7 @@ where
 impl<R, F, T, S> SorterTypedClass<R> for SorterClassImpl<F, S>
 where
     F: Field<R, Value = T> + 'static,
-    S: SorterTypedClass<T>
+    S: SorterTypedClass<T>,
 {
     type Sorter = SorterImpl<F, <S as SorterTypedClass<T>>::Sorter>;
     fn instantiate(&self) -> Self::Sorter {
@@ -319,7 +323,7 @@ where
 pub trait SortVisitor {
     type Target;
     /// Receive a basic sort on a given raw [Field], named `name`.
-    /// The comparison operator itself is given as `sort`. 
+    /// The comparison operator itself is given as `sort`.
     fn visit_sort<F, T, S>(&mut self, name: &str, field: &F, sort: &S)
     where
         F: Field<Self::Target, Value = T> + 'static,
@@ -374,14 +378,14 @@ where
     where
         F: Field<R, Value = T> + 'static,
         S: SorterTypedClass<T> + 'static,
-        <S as SorterTypedClass<T>>::Sorter: 'static
+        <S as SorterTypedClass<T>>::Sorter: 'static,
     {
         self.parent.visit_sort(
             name,
             &WrappedField {
                 inner: field.clone(),
             },
-            sort
+            sort,
         );
     }
 
@@ -442,14 +446,14 @@ where
     where
         F: Field<R, Value = T> + 'static,
         S: SorterTypedClass<T> + 'static,
-        <S as SorterTypedClass<T>>::Sorter: 'static
+        <S as SorterTypedClass<T>>::Sorter: 'static,
     {
         self.parent.visit_sort(
             name,
             &OptionField {
                 inner: field.clone(),
             },
-            sort
+            sort,
         );
     }
 
@@ -562,7 +566,7 @@ impl<R: Sortable> SortVisitor for OrderingSet<R> {
     where
         F: Field<R, Value = T> + 'static,
         S: SorterTypedClass<T> + 'static,
-        <S as SorterTypedClass<T>>::Sorter: 'static
+        <S as SorterTypedClass<T>>::Sorter: 'static,
     {
         self.sorts.insert(
             name.to_string(),
@@ -604,7 +608,7 @@ where
     where
         F: Field<R, Value = T> + 'static,
         Srt: SorterTypedClass<T> + 'static,
-        <Srt as SorterTypedClass<T>>::Sorter: 'static
+        <Srt as SorterTypedClass<T>>::Sorter: 'static,
     {
         if name == self.key {
             self.parent.visit_sort(
@@ -613,7 +617,7 @@ where
                     outer: self.field.clone(),
                     inner: field.clone(),
                 },
-                sort
+                sort,
             );
         }
     }

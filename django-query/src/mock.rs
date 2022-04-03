@@ -68,7 +68,7 @@ use thiserror::Error;
 use wiremock::http::Url;
 use wiremock::{Request, Respond, ResponseTemplate};
 
-use crate::{IntoRow, Filterable, OperatorSet, Sortable, OrderingSet};
+use crate::{Filterable, IntoRow, OperatorSet, OrderingSet, Sortable};
 
 use crate::filtering::Filter;
 use crate::ordering::Sorter;
@@ -335,7 +335,7 @@ where
     let pairs = url.query_pairs();
     println!("Getting pairs from url {:?} - {}", url, url);
     for (key, value) in pairs {
-        println!("Processing qp {}={}", key,value);
+        println!("Processing qp {}={}", key, value);
         match key.as_ref() {
             "ordering" => {
                 rb.order_by(sr.create_sort(&*value)?);
@@ -387,7 +387,7 @@ where
 /// objects.
 pub struct Endpoint<T> {
     row_source: T,
-    base_uri: Option<Url>
+    base_uri: Option<Url>,
 }
 
 impl<T, R> Endpoint<T>
@@ -411,7 +411,10 @@ where
     /// information (i.e. including usable URLs for the next page
     /// within the query response is impossible).
     pub fn new(row_source: T, base_uri: Option<&str>) -> Self {
-        Self { row_source, base_uri: base_uri.map(|x| Url::parse(x).unwrap()) }
+        Self {
+            row_source,
+            base_uri: base_uri.map(|x| Url::parse(x).unwrap()),
+        }
     }
 }
 
@@ -522,7 +525,7 @@ impl UrlTransform {
 /// which `Bar` they come from, then you can express this in Django as a nested route:
 ///
 ///   ``http://example.com/bars/my-bar-id/foos``
-/// 
+///
 /// where in order to ask any question about `Foo`s you must first
 /// identify a particular associated `Bar`.
 ///
