@@ -328,25 +328,20 @@ where
     <T as RowSource>::Rows: Deref,
     for<'t> &'t <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'t R>,
 {
-    println!("Parse query");
     let mut rb = ResponseSetBuilder::new();
     let qr = OperatorSet::<R>::new();
     let sr = OrderingSet::<R>::new();
     let pairs = url.query_pairs();
-    println!("Getting pairs from url {:?} - {}", url, url);
     for (key, value) in pairs {
-        println!("Processing qp {}={}", key, value);
         match key.as_ref() {
             "ordering" => {
                 rb.order_by(sr.create_sort(&*value)?);
             }
             "offset" => {
-                println!("Saw offset {}", value.as_ref());
                 let v = usize::from_str(value.as_ref())?;
                 rb.offset(v);
             }
             "limit" => {
-                println!("Saw limit {}", value.as_ref());
                 let v = usize::from_str(value.as_ref())?;
                 rb.limit(v);
             }
