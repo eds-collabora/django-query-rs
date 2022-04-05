@@ -8,6 +8,7 @@ description = "Tools for mocking Django-style endpoints"
 repository = "https://github.com/eds-collabora/django-query-rs"
 keywords = [ "mock", "django", "testing" ]
 categories = [ "asynchronous", "development-tools" ]
+readme = "../README.md"
 
 [dependencies]
 anyhow = "1"
