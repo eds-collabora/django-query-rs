@@ -766,10 +766,9 @@ where
         T: Meta<U> + 'static,
         U: 'static,
     {
-        let name = format!("{}__{}", self.prefix, name);
         let mut n = NestedMetaVisitor {
             parent: self,
-            prefix: name,
+            prefix: name.to_string(),
             nester: NesterImpl {
                 outer_field: field.clone(),
             },
