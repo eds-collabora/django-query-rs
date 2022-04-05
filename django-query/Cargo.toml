@@ -4,11 +4,15 @@ version = "0.1.0"
 authors = ["Edmund Smith <ed.smith@collabora.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
+description = "Tools for mocking Django-style endpoints"
+repository = "https://github.com/eds-collabora/django-query-rs"
+keywords = [ "mock", "django", "testing" ]
+categories = [ "asynchronous", "development-tools" ]
 
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
-django_derive= { path="../django_derive" }
+django-query_derive= { version = "0.1.0", path="../django-query_derive" }
 log = "0.4"
 regex = "1"
 serde_json = "1"

@@ -537,6 +537,7 @@ impl UrlTransform {
 pub struct NestedEndpoint<T> {
     transform: UrlTransform,
     row_source: T,
+    base_uri: Option<Url>,
 }
 
 impl<T, R> NestedEndpoint<T>
@@ -551,10 +552,11 @@ where
     /// The given [UrlTransform] will be applied to every incoming
     /// request. The `row_source` will be used to gather the data to
     /// respond to the rewritten request.
-    pub fn new(transform: UrlTransform, row_source: T) -> Self {
+    pub fn new(transform: UrlTransform, row_source: T, base_uri: Option<&str>) -> Self {
         Self {
             transform,
             row_source,
+            base_uri: base_uri.map(|x| Url::parse(x).unwrap()),
         }
     }
 }
@@ -568,10 +570,15 @@ where
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         trace!("Request URL: {}", request.url);
-        let u = self.transform.transform(&request.url);
+        let mut u = self.transform.transform(&request.url);
         trace!("Transformed URL: {}", u);
 
         let data: <T as RowSource>::Rows = self.row_source.get();
+        if let Some(ref base) = self.base_uri {
+            u.set_host(base.host_str()).unwrap();
+            u.set_scheme(base.scheme()).unwrap();
+            u.set_port(base.port()).unwrap();
+        }
         let body = parse_query::<T, R>(&u, (&data).into_iter());
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),

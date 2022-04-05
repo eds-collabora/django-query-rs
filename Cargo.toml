@@ -1,6 +1,6 @@
 [workspace]
 members = [
   "django-query",
-  "django_derive",
+  "django-query_derive",
   "test_suite",
 ]
