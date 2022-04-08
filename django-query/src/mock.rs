@@ -158,16 +158,16 @@ struct ResponseSetBuilder<T> {
 
 impl<T> Default for ResponseSetBuilder<T> {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 impl<T> ResponseSetBuilder<T> {
-    pub fn new() -> Self {
+    pub fn new(default_limit: Option<usize>) -> Self {
         ResponseSetBuilder {
             ordering: Vec::new(),
             filtering: Vec::new(),
-            limit: None,
+            limit: default_limit,
             offset: 0,
         }
     }
@@ -246,6 +246,8 @@ fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
     let mut new_pairs = new_url.query_pairs_mut();
     let old_pairs = url.query_pairs();
 
+    let mut offset_seen = false;
+
     new_pairs.clear();
     for (key, value) in old_pairs {
         match key.as_ref() {
@@ -256,12 +258,18 @@ fn make_page_url(url: &Url, offset: usize, limit: usize) -> Url {
                 if offset > 0 {
                     new_pairs.append_pair("offset", &offset.to_string());
                 }
+                offset_seen = true;
             }
             _ => {
                 new_pairs.append_pair(key.as_ref(), value.as_ref());
             }
         }
     }
+
+    if !offset_seen && offset > 0 {
+        new_pairs.append_pair("offset", &offset.to_string());
+    }
+
     new_pairs.finish();
     drop(new_pairs);
 
@@ -321,6 +329,7 @@ impl<T> RowSource for std::sync::Arc<Vec<T>> {
 fn parse_query<'a, T, R>(
     url: &Url,
     iter: <&'a <<T as RowSource>::Rows as Deref>::Target as IntoIterator>::IntoIter,
+    default_limit: Option<usize>,
 ) -> Result<ResponseSet<&'a R>, MockError>
 where
     T: Send + Sync + RowSource<Item = R>,
@@ -328,7 +337,7 @@ where
     <T as RowSource>::Rows: Deref,
     for<'t> &'t <<T as RowSource>::Rows as Deref>::Target: IntoIterator<Item = &'t R>,
 {
-    let mut rb = ResponseSetBuilder::new();
+    let mut rb = ResponseSetBuilder::new(default_limit);
     let qr = OperatorSet::<R>::new();
     let sr = OrderingSet::<R>::new();
     let pairs = url.query_pairs();
@@ -383,6 +392,7 @@ where
 pub struct Endpoint<T> {
     row_source: T,
     base_uri: Option<Url>,
+    default_limit: Option<usize>,
 }
 
 impl<T, R> Endpoint<T>
@@ -409,7 +419,19 @@ where
         Self {
             row_source,
             base_uri: base_uri.map(|x| Url::parse(x).unwrap()),
+            default_limit: None,
         }
+    }
+
+    /// Set the default number of results returned
+    ///
+    /// This is the value used when no limit is specified in the
+    /// query.  This value is configurable in Django; the default
+    /// behaviour of this mock endpoint is to return everything, but
+    /// that makes testing code that uses the default pagination more
+    /// difficult.
+    pub fn default_limit(&mut self, limit: usize) {
+        self.default_limit = Some(limit);
     }
 }
 
@@ -430,7 +452,7 @@ where
             u.set_scheme(base.scheme()).unwrap();
             u.set_port(base.port()).unwrap();
         }
-        let body = parse_query::<T, R>(&u, (&data).into_iter());
+        let body = parse_query::<T, R>(&u, (&data).into_iter(), self.default_limit);
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
             Err(e) => {
@@ -533,6 +555,7 @@ pub struct NestedEndpoint<T> {
     transform: UrlTransform,
     row_source: T,
     base_uri: Option<Url>,
+    default_limit: Option<usize>,
 }
 
 impl<T, R> NestedEndpoint<T>
@@ -552,7 +575,19 @@ where
             transform,
             row_source,
             base_uri: base_uri.map(|x| Url::parse(x).unwrap()),
+            default_limit: None,
         }
+    }
+
+    /// Set the default number of results returned
+    ///
+    /// This is the value used when no limit is specified in the
+    /// query.  This value is configurable in Django; the default
+    /// behaviour of this mock endpoint is to return everything, but
+    /// that makes testing code that uses the default pagination more
+    /// difficult.
+    pub fn default_limit(&mut self, limit: usize) {
+        self.default_limit = Some(limit);
     }
 }
 
@@ -574,7 +609,7 @@ where
             u.set_scheme(base.scheme()).unwrap();
             u.set_port(base.port()).unwrap();
         }
-        let body = parse_query::<T, R>(&u, (&data).into_iter());
+        let body = parse_query::<T, R>(&u, (&data).into_iter(), self.default_limit);
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
             Err(e) => {
