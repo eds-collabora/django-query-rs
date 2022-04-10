@@ -45,9 +45,9 @@
 //!    let next = format!("{}/?limit=1&offset=6&a__lt=10&ordering=-a", server.uri());
 //!    assert_eq!(body, serde_json::json!{
 //!      {
-//!        "count": 1,
+//!        "count": 10,
 //!        "next": next,
-//!        "prev": prev,
+//!        "previous": prev,
 //!        "results": [
 //!          { "a": 4 }
 //!        ]
@@ -89,14 +89,21 @@ pub enum MockError {
 
 struct ResponseSet<T> {
     contents: Vec<T>,
+    total_matches: usize,
     next: Option<String>,
     prev: Option<String>,
 }
 
 impl<T> ResponseSet<T> {
-    pub fn new(contents: Vec<T>, next: Option<String>, prev: Option<String>) -> Self {
+    pub fn new(
+        contents: Vec<T>,
+        total_matches: usize,
+        next: Option<String>,
+        prev: Option<String>,
+    ) -> Self {
         ResponseSet {
             contents,
+            total_matches,
             next,
             prev,
         }
@@ -108,7 +115,7 @@ impl<T: IntoRow> ResponseSet<&T> {
         let mut map = serde_json::map::Map::new();
         map.insert(
             "count".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(self.contents.len())),
+            serde_json::Value::Number(serde_json::Number::from(self.total_matches)),
         );
         map.insert("results".to_string(), to_rows(&self.contents));
         map.insert(
@@ -119,7 +126,7 @@ impl<T: IntoRow> ResponseSet<&T> {
                 .unwrap_or(serde_json::Value::Null),
         );
         map.insert(
-            "prev".to_string(),
+            "previous".to_string(),
             self.prev
                 .as_ref()
                 .map(|x| serde_json::Value::String(x.clone()))
@@ -145,6 +152,7 @@ struct Page {
 
 struct PaginatedResponse<'a, T> {
     data: Vec<&'a T>,
+    total: usize,
     next: Option<Page>,
     prev: Option<Page>,
 }
@@ -207,6 +215,7 @@ impl<T> ResponseSetBuilder<T> {
         }
 
         let limit = self.limit.unwrap_or(v.len());
+        let total = v.len();
 
         let start = min(v.len(), self.offset);
         let prev = if start > 0 {
@@ -234,6 +243,7 @@ impl<T> ResponseSetBuilder<T> {
 
         PaginatedResponse {
             data: v,
+            total,
             next,
             prev,
         }
@@ -368,6 +378,7 @@ where
     let response = rb.apply(iter);
     Ok(ResponseSet::new(
         response.data,
+        response.total,
         response
             .next
             .map(|page| make_page_url(output_url, page.offset, page.limit).to_string()),

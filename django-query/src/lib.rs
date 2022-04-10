@@ -93,7 +93,7 @@
 //!      {
 //!        "count": 1,
 //!        "next": null,
-//!        "prev": null,
+//!        "previous": null,
 //!        "results": [
 //!          { "names": ["apple", "banana"], "foo": "foo1" },
 //!        ]
