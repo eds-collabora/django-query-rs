@@ -28,6 +28,7 @@ pub enum DjangoItem {
     DefaultOperator2(syn::Path),
     Traversed,
     Ignored,
+    NoFilter,
     Sort(Option<syn::LitStr>),
     ForeignKey(syn::LitStr),
 }
@@ -53,6 +54,7 @@ impl syn::parse::Parse for DjangoItem {
                 Ok(DjangoItem::DefaultOperator2(fun))
             }
             "exclude" => Ok(DjangoItem::Ignored),
+            "unfilterable" => Ok(DjangoItem::NoFilter),
             "traverse" => Ok(DjangoItem::Traversed),
             "op" => {
                 // op(in = MyInOperatorClass)
@@ -116,6 +118,7 @@ impl syn::parse::Parse for DjangoMeta {
         let mut defop = (None, None);
         let mut excluded = false;
         let mut traversed = false;
+        let mut no_filter = false;
         let punc =
             syn::punctuated::Punctuated::<DjangoItem, syn::Token![,]>::parse_terminated(input)?;
         let mut sort = None;
@@ -147,6 +150,9 @@ impl syn::parse::Parse for DjangoMeta {
                 DjangoItem::Ignored => {
                     excluded = true;
                 }
+                DjangoItem::NoFilter => {
+                    no_filter = true;
+                }
                 DjangoItem::Traversed => {
                     traversed = true;
                 }
@@ -154,7 +160,7 @@ impl syn::parse::Parse for DjangoMeta {
                 DjangoItem::ForeignKey(key) => foreign_key = Some(key),
             }
         }
-        let filtering = if excluded {
+        let filtering = if excluded || no_filter {
             DjangoFiltering::Excluded
         } else if traversed {
             DjangoFiltering::Traversed
