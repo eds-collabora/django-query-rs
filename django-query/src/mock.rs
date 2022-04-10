@@ -327,7 +327,8 @@ impl<T> RowSource for std::sync::Arc<Vec<T>> {
 }
 
 fn parse_query<'a, T, R>(
-    url: &Url,
+    input_url: &Url,
+    output_url: &Url,
     iter: <&'a <<T as RowSource>::Rows as Deref>::Target as IntoIterator>::IntoIter,
     default_limit: Option<usize>,
 ) -> Result<ResponseSet<&'a R>, MockError>
@@ -340,7 +341,7 @@ where
     let mut rb = ResponseSetBuilder::new(default_limit);
     let qr = OperatorSet::<R>::new();
     let sr = OrderingSet::<R>::new();
-    let pairs = url.query_pairs();
+    let pairs = input_url.query_pairs();
     for (key, value) in pairs {
         match key.as_ref() {
             "ordering" => {
@@ -369,10 +370,10 @@ where
         response.data,
         response
             .next
-            .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
+            .map(|page| make_page_url(output_url, page.offset, page.limit).to_string()),
         response
             .prev
-            .map(|page| make_page_url(url, page.offset, page.limit).to_string()),
+            .map(|page| make_page_url(output_url, page.offset, page.limit).to_string()),
     ))
 }
 
@@ -452,7 +453,7 @@ where
             u.set_scheme(base.scheme()).unwrap();
             u.set_port(base.port()).unwrap();
         }
-        let body = parse_query::<T, R>(&u, (&data).into_iter(), self.default_limit);
+        let body = parse_query::<T, R>(&request.url, &u, (&data).into_iter(), self.default_limit);
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
             Err(e) => {
@@ -463,44 +464,25 @@ where
     }
 }
 
+/// Match a Django-style nested endpoint in wiremock
+///
+/// This avoids using regular expressions in the calling code. Here
+/// - `root` is the base of Django API, like `"/api/v0.2"`
+/// - `parent` is the parent object, like `"bar"`
+/// - `child` is the nested object, like `"foo"`
+///
+/// See the description of [NestedEndpointParams] for more detail.
+pub fn nested_endpoint_matches(root: &str, parent: &str, child: &str) -> impl wiremock::Match {
+    wiremock::matchers::path_regex(format!(r"^{}/{}/[^/]+/{}/$", root, parent, child))
+}
+
 fn replace_into(target: &str, cap: &Captures<'_>) -> String {
     let mut res = String::new();
     cap.expand(target, &mut res);
     res
 }
 
-#[allow(rustdoc::bare_urls)]
-/// Use a regex to match a query path, mutating both the path and query string.
-///
-/// Some Django-based services support nested endpoints, where the
-/// path of the URL might look like:
-///
-///    <http://example.com/womble/6/neighbours>
-///
-/// Since our parsing operates on the query parameters, we'd like to rewrite this
-/// URL before we process it, to fit the remainder of the pipeline better. For
-/// example we might want to create:
-///
-///    <http://example.com/neighbours?womble=6>
-///
-/// from the preceding URL.
-///
-/// Example:
-/// ```rust
-/// use wiremock::http::Url;
-/// use django_query::mock::UrlTransform;
-///
-/// let ut = UrlTransform::new(r"^/base/foos/(\d+)/(.+)$",
-///                            r"/base/$2",
-///                            vec![("foo", "$1")]);
-/// let u = Url::parse("http://example.com/base/foos/1214/bars?ordering=name").unwrap();
-/// let t = Url::parse("http://example.com/base/bars?ordering=name&foo=1214").unwrap();
-/// assert_eq!(ut.transform(&u), t);
-/// ```
-///
-/// This is intended for use with [NestedEndpoint], which differs from
-/// [Endpoint] only in applying a [UrlTransform] to its input.
-pub struct UrlTransform {
+struct UrlTransform {
     regex: Regex,
     path: String,
     pairs: Vec<(String, String)>,
@@ -519,6 +501,7 @@ impl UrlTransform {
     }
 
     pub fn transform(&self, url: &Url) -> Url {
+        debug!("Matching {} against {:?}", url, self.regex);
         if let Some(captures) = self.regex.captures(url.path()) {
             let mut u = url.clone();
             u.set_path(&replace_into(&self.path, &captures));
@@ -535,11 +518,13 @@ impl UrlTransform {
 
 /// A Django nested route.
 ///
-/// A nested route in Django is a way of specifying that a particular filter field must
-/// be present when querying for a particular object type, and that it the filter type
-/// must be exact match. So for example, if all objects of type `Foo` have a reference to
-/// a `Bar`, and its too expensive or undesirable to query for `Foo`s without specifying
-/// which `Bar` they come from, then you can express this in Django as a nested route:
+/// A nested route in Django is a way of specifying that a particular
+/// filter field must be present when querying for a particular object
+/// type, and that the filter type must be exact match. So for
+/// example, if all objects of type `Foo` have a reference to a `Bar`,
+/// and its too expensive or undesirable to query for `Foo`s without
+/// specifying which `Bar` they come from, then you can express this
+/// in Django as a nested route:
 ///
 ///   ``http://example.com/bars/my-bar-id/foos``
 ///
@@ -547,15 +532,36 @@ impl UrlTransform {
 /// identify a particular associated `Bar`.
 ///
 /// Since the django-query crate operates on query parameters, the
-/// simplest way to handle this is to use a [UrlTransform] to convert
-/// any relevant parts of the path into query parameters as required,
-/// which is all this type does.  It is otherwise identical to
-/// [Endpoint].
+/// simplest way to handle this is to convert any relevant parts of
+/// the path into query parameters as required, which is all this type
+/// does. See its construction parameters [NestedEndpointParams] for
+/// the details. This type is otherwise identical to [Endpoint].
 pub struct NestedEndpoint<T> {
     transform: UrlTransform,
     row_source: T,
     base_uri: Option<Url>,
     default_limit: Option<usize>,
+}
+
+/// The construction parameters for [NestedEndpoint]
+pub struct NestedEndpointParams<'a, T> {
+    /// The base mock path, without trailing slash, for example `"/api/v0.2"`
+    pub root: &'a str,
+    /// The objects this endpoint is nested under, for example `"bars"`.
+    pub parent: &'a str,
+    /// The objects this endpoint serves, for example `"foos"`
+    pub child: &'a str,
+    /// The filter path for the parent from the child, so for
+    /// example `"parent"` if the filter expression for a given
+    /// Foo to obtain its containing Bar is `"parent"`.
+    pub parent_query: &'a str,
+    /// The actual data to serve, as for [Endpoint]
+    pub row_source: T,
+    /// The mock server URI, since wiremock does not make this
+    /// available to us; specifying None here will break
+    /// pagination (if requested) until wiremock propagates this
+    /// information.
+    pub base_uri: Option<&'a str>,
 }
 
 impl<T, R> NestedEndpoint<T>
@@ -567,14 +573,17 @@ where
 {
     /// Create a new NestedEndpoint.
     ///
-    /// The given [UrlTransform] will be applied to every incoming
-    /// request. The `row_source` will be used to gather the data to
-    /// respond to the rewritten request.
-    pub fn new(transform: UrlTransform, row_source: T, base_uri: Option<&str>) -> Self {
+    /// The arguments to this function are wrapped in their own
+    /// structure: [NestedEndpointParams].
+    pub fn new(p: NestedEndpointParams<'_, T>) -> Self {
         Self {
-            transform,
-            row_source,
-            base_uri: base_uri.map(|x| Url::parse(x).unwrap()),
+            transform: UrlTransform::new(
+                &format!(r"^{}/{}/(?P<parent>[^/]+)/{}/$", p.root, p.parent, p.child),
+                &format!("{}/{}/", p.root, p.child),
+                vec![(&*p.parent_query, "${parent}")],
+            ),
+            row_source: p.row_source,
+            base_uri: p.base_uri.map(|x| Url::parse(x).unwrap()),
             default_limit: None,
         }
     }
@@ -600,16 +609,22 @@ where
 {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         trace!("Request URL: {}", request.url);
-        let mut u = self.transform.transform(&request.url);
-        trace!("Transformed URL: {}", u);
+        let input_url = self.transform.transform(&request.url);
+        trace!("Transformed URL: {}", input_url);
 
         let data: <T as RowSource>::Rows = self.row_source.get();
+        let mut output_url = request.url.clone();
         if let Some(ref base) = self.base_uri {
-            u.set_host(base.host_str()).unwrap();
-            u.set_scheme(base.scheme()).unwrap();
-            u.set_port(base.port()).unwrap();
+            output_url.set_host(base.host_str()).unwrap();
+            output_url.set_scheme(base.scheme()).unwrap();
+            output_url.set_port(base.port()).unwrap();
         }
-        let body = parse_query::<T, R>(&u, (&data).into_iter(), self.default_limit);
+        let body = parse_query::<T, R>(
+            &input_url,
+            &output_url,
+            (&data).into_iter(),
+            self.default_limit,
+        );
         match body {
             Ok(rs) => ResponseTemplate::new(200).set_body_json(rs.mock_json()),
             Err(e) => {
