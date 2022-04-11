@@ -189,7 +189,7 @@ where
     <T as chrono::TimeZone>::Offset: Display,
 {
     fn to_cell_value(&self) -> CellValue {
-        CellValue::String(self.to_rfc3339())
+        CellValue::String(self.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
     }
 }
 
