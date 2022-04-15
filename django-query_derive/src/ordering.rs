@@ -13,7 +13,7 @@ pub fn derive_sortable(input: syn::DeriveInput) -> pm2::TokenStream {
     let mut body = pm2::TokenStream::new();
     let mut structs = pm2::TokenStream::new();
 
-    let wc = generics.where_clause.as_ref();
+    let (generics, ty_generics, wc) = generics.split_for_impl();
 
     if let syn::Data::Struct(s) = data {
         if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
@@ -48,13 +48,13 @@ pub fn derive_sortable(input: syn::DeriveInput) -> pm2::TokenStream {
                         #[derive(Clone)]
                         struct #structname;
                         #[automatically_derived]
-                        impl #generics ::django_query::ordering::Accessor<#ident #generics> for #structname #wc {
+                        impl #generics ::django_query::ordering::Accessor<#ident #ty_generics> for #structname #wc {
                             type Value = #fieldtype;
-                            fn value<'a>(&self, data: &'a #ident #generics) -> &'a Self::Value {
+                            fn value<'a>(&self, data: &'a #ident #ty_generics) -> &'a Self::Value {
                                 &data.#fieldid
                             }
                         }
-                        impl #generics ::django_query::ordering::ReferenceField for #structname #wc {}
+                        impl ::django_query::ordering::ReferenceField for #structname #wc {}
                     });
                     if let Some(key) = sort {
                         body.extend(quote::quote! {
@@ -86,7 +86,7 @@ pub fn derive_sortable(input: syn::DeriveInput) -> pm2::TokenStream {
         const _: () = {
             #structs
             #[automatically_derived]
-            impl #generics ::django_query::Sortable for #ident #generics #wc {
+            impl #generics ::django_query::Sortable for #ident #ty_generics #wc {
                 fn accept_visitor<V: ::django_query::ordering::SortVisitor<Target=Self>>(visitor: &mut V)
                 where
                     Self: Sized

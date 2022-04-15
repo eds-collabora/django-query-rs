@@ -13,7 +13,7 @@ pub fn derive_into_row(input: syn::DeriveInput) -> pm2::TokenStream {
     let mut cells = pm2::TokenStream::new();
     let mut cols = pm2::TokenStream::new();
 
-    let wc = generics.where_clause.as_ref();
+    let (generics, ty_generics, wc) = generics.split_for_impl();
 
     if let syn::Data::Struct(s) = data {
         if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
@@ -79,7 +79,7 @@ pub fn derive_into_row(input: syn::DeriveInput) -> pm2::TokenStream {
     let res = quote::quote! {
         const _: () = {
             #[automatically_derived]
-            impl #generics ::django_query::IntoRow for #ident #generics #wc {
+            impl #generics ::django_query::IntoRow for #ident #ty_generics #wc {
                 fn accept_cell_visitor<V: ::django_query::row::CellVisitor>(&self, visitor: &mut V)
                 {
                     #cells

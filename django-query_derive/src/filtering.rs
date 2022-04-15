@@ -51,7 +51,7 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
         ),
     ]);
 
-    let wc = generics.where_clause.as_ref();
+    let (generics, ty_generics, wc) = generics.split_for_impl();
 
     if let syn::Data::Struct(s) = data {
         if let syn::Fields::Named(syn::FieldsNamed { named, .. }) = s.fields {
@@ -139,9 +139,9 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
                     #[derive(Clone)]
                     struct #structname;
                     #[automatically_derived]
-                    impl #generics ::django_query::filtering::Field<#ident #generics> for #structname #wc {
+                    impl #generics ::django_query::filtering::Field<#ident #ty_generics> for #structname #wc {
                         type Value = #fieldtype;
-                        fn apply<O: ::django_query::filtering::Operator<Self::Value>>(&self, op: &O, data: &#ident #generics) -> bool {
+                        fn apply<O: ::django_query::filtering::Operator<Self::Value>>(&self, op: &O, data: &#ident #ty_generics) -> bool {
                             op.apply(&data.#fieldid)
                         }
                     }
@@ -154,12 +154,12 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
                 } else {
                     structs.extend(quote::quote! {
                         #[automatically_derived]
-                        impl #generics ::django_query::filtering::Member<#ident #generics> for #structname #wc {
+                        impl #generics ::django_query::filtering::Member<#ident #ty_generics> for #structname #wc {
                             type Value = #fieldtype;
-                            fn apply<O: ::django_query::filtering::Operator<<Self::Value as ::django_query::filtering::Operable>::Base>>(&self, op: &O, data: &#ident #generics) -> bool {
+                            fn apply<O: ::django_query::filtering::Operator<<Self::Value as ::django_query::filtering::Operable>::Base>>(&self, op: &O, data: &#ident #ty_generics) -> bool {
                                 <Self::Value as ::django_query::filtering::Operable>::apply(&data.#fieldid, op)
                             }
-                            fn accept_visitor<V: ::django_query::filtering::MemberVisitor<Self, #ident #generics, <Self as ::django_query::filtering::Field<#ident #generics>>::Value>>(&self, visitor: &mut V) {
+                            fn accept_visitor<V: ::django_query::filtering::MemberVisitor<Self, #ident #ty_generics, <Self as ::django_query::filtering::Field<#ident #ty_generics>>::Value>>(&self, visitor: &mut V) {
                                 #fieldbody
                             }
                         }
@@ -179,8 +179,8 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
 
             structs.extend(quote::quote! {
                 pub struct Meta;
-                impl #generics ::django_query::filtering::Meta<#ident #generics> for Meta #wc {
-                    fn accept_visitor<V: ::django_query::filtering::MetaVisitor<#ident #generics>>(&self, visitor: &mut V) where Self: Sized {
+                impl #generics ::django_query::filtering::Meta<#ident #ty_generics> for Meta #wc {
+                    fn accept_visitor<V: ::django_query::filtering::MetaVisitor<#ident #ty_generics>>(&self, visitor: &mut V) where Self: Sized {
                         #body
                     }
                 }
@@ -204,7 +204,7 @@ pub fn derive_filterable(input: syn::DeriveInput) -> pm2::TokenStream {
         const _: () = {
             #structs
             #[automatically_derived]
-            impl #generics ::django_query::Filterable for #ident #generics #wc {
+            impl #generics ::django_query::Filterable for #ident #ty_generics #wc {
                 type Meta = Meta;
                 fn get_meta() -> Self::Meta {
                     Meta
