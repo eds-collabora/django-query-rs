@@ -45,7 +45,7 @@ fn simple_test() {
 
 It integrates with
 [`persian-rug`](https://docs.rs/persian-rug/latest/persian-rug/) and
-[`clone-replace`]((https://docs.rs/clone-replace/latest/clone-replace/)
+[`clone-replace`](https://docs.rs/clone-replace/latest/clone-replace/)
 to provide mutable collections of interlinked objects.
 
 ## License
