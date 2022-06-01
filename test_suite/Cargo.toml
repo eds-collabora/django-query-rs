@@ -1,11 +1,16 @@
 [package]
 name = "test_suite"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Ed Smith <ed.smith@collabora.com>"]
 publish = false
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-django-query = { path = "../django-query" }
+django-query = { path = "../django-query", features = ["persian-rug", "wiremock"] }
 serde_json = "1"
+tokio = { version = "1.4", features = ["macros", "rt", "rt-multi-thread", "sync"] }
+tokio-test = "0.4"
+wiremock = { version = "0.5" }
+persian-rug = { version="0.1" }
+

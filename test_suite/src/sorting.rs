@@ -1,4 +1,4 @@
-use django_query::{ordering, Sortable};
+use django_query::sorting::{self, Sortable};
 
 struct MyRecord {
     string_field: String,
@@ -8,32 +8,41 @@ struct MyRecord {
 #[derive(Clone)]
 struct StringField;
 
-impl ordering::Accessor<MyRecord> for StringField {
+impl sorting::Accessor<MyRecord> for StringField {
     type Value = String;
     fn value<'a>(&self, data: &'a MyRecord) -> &'a String {
         &data.string_field
     }
 }
-impl ordering::ReferenceField for StringField {}
+impl sorting::ReferenceField for StringField {}
 
 #[derive(Clone)]
 struct IntField;
 
-impl ordering::Accessor<MyRecord> for IntField {
+impl sorting::Accessor<MyRecord> for IntField {
     type Value = i32;
     fn value<'a>(&self, data: &'a MyRecord) -> &'a i32 {
         &data.int_field
     }
 }
-impl ordering::ReferenceField for IntField {}
+impl sorting::ReferenceField for IntField {}
 
-impl ordering::Sortable for MyRecord {
-    fn accept_visitor<V: ordering::SortVisitor<Target = Self>>(visitor: &mut V)
+struct MyRecordMeta;
+
+impl<'s> sorting::Sortable<'s> for MyRecord {
+    type Meta = MyRecordMeta;
+    fn get_meta() -> Self::Meta {
+        MyRecordMeta
+    }
+}
+
+impl<'s> sorting::Meta<'s, MyRecord> for MyRecordMeta {
+    fn accept_visitor<V: sorting::SortVisitor<'s, Target = MyRecord>>(&self, visitor: &mut V)
     where
         Self: Sized,
     {
-        visitor.visit_sort("string_field", &StringField, &ordering::CompareClass);
-        visitor.visit_sort("int_field", &IntField, &ordering::CompareClass);
+        visitor.visit_sort("string_field", &StringField, &sorting::CompareClass);
+        visitor.visit_sort("int_field", &IntField, &sorting::CompareClass);
     }
 }
 
@@ -54,7 +63,7 @@ fn test_basic() {
         },
     ];
 
-    let sr = ordering::OrderingSet::<MyRecord>::new();
+    let sr = sorting::OrderingSet::<MyRecord>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -89,32 +98,41 @@ struct MyRecord2 {
 #[derive(Clone)]
 struct FooField2;
 
-impl ordering::Accessor<MyRecord2> for FooField2 {
+impl sorting::Accessor<MyRecord2> for FooField2 {
     type Value = MyRecord;
     fn value<'a>(&self, data: &'a MyRecord2) -> &'a MyRecord {
         &data.foo
     }
 }
-impl ordering::ReferenceField for FooField2 {}
+impl sorting::ReferenceField for FooField2 {}
 
 #[derive(Clone)]
 struct IntField2;
 
-impl ordering::Accessor<MyRecord2> for IntField2 {
+impl sorting::Accessor<MyRecord2> for IntField2 {
     type Value = i32;
     fn value<'a>(&self, data: &'a MyRecord2) -> &'a i32 {
         &data.int_field
     }
 }
-impl ordering::ReferenceField for IntField2 {}
+impl sorting::ReferenceField for IntField2 {}
 
-impl ordering::Sortable for MyRecord2 {
-    fn accept_visitor<V: ordering::SortVisitor<Target = Self>>(visitor: &mut V)
+struct MyRecord2Meta;
+
+impl<'s> sorting::Sortable<'s> for MyRecord2 {
+    type Meta = MyRecord2Meta;
+    fn get_meta() -> Self::Meta {
+        MyRecord2Meta
+    }
+}
+
+impl<'s> sorting::Meta<'s, MyRecord2> for MyRecord2Meta {
+    fn accept_visitor<V: sorting::SortVisitor<'s, Target = MyRecord2>>(&self, visitor: &mut V)
     where
         Self: Sized,
     {
-        visitor.visit_key_sort("foo", &FooField2, "string_field");
-        visitor.visit_sort("int_field", &IntField2, &ordering::CompareClass);
+        visitor.visit_key_sort("foo", &FooField2, "string_field", MyRecordMeta);
+        visitor.visit_sort("int_field", &IntField2, &sorting::CompareClass);
     }
 }
 
@@ -144,7 +162,7 @@ fn test_nesting() {
         },
     ];
 
-    let sr = ordering::OrderingSet::<MyRecord2>::new();
+    let sr = sorting::OrderingSet::<MyRecord2>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -181,56 +199,66 @@ struct MyRecord3 {
 #[derive(Clone)]
 struct BarField3;
 
-impl ordering::Accessor<MyRecord3> for BarField3 {
+impl sorting::Accessor<MyRecord3> for BarField3 {
     type Value = MyRecord2;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a MyRecord2 {
         &data.bar
     }
 }
-impl ordering::ReferenceField for BarField3 {}
+impl sorting::ReferenceField for BarField3 {}
 
 #[derive(Clone)]
 struct FooField3;
 
-impl ordering::Accessor<MyRecord3> for FooField3 {
+impl sorting::Accessor<MyRecord3> for FooField3 {
     type Value = MyRecord;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a MyRecord {
         &data.foo
     }
 }
-impl ordering::ReferenceField for FooField3 {}
+impl sorting::ReferenceField for FooField3 {}
 
 #[derive(Clone)]
 struct IntField3;
 
-impl ordering::Accessor<MyRecord3> for IntField3 {
+impl sorting::Accessor<MyRecord3> for IntField3 {
     type Value = i32;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a i32 {
         &data.int_field
     }
 }
-impl ordering::ReferenceField for IntField3 {}
+impl sorting::ReferenceField for IntField3 {}
 
 #[derive(Clone)]
 struct StringField3;
 
-impl ordering::Accessor<MyRecord3> for StringField3 {
+impl sorting::Accessor<MyRecord3> for StringField3 {
     type Value = String;
     fn value<'a>(&self, data: &'a MyRecord3) -> &'a String {
         &data.string_field
     }
 }
-impl ordering::ReferenceField for StringField3 {}
+impl sorting::ReferenceField for StringField3 {}
 
-impl ordering::Sortable for MyRecord3 {
-    fn accept_visitor<V: ordering::SortVisitor<Target = Self>>(visitor: &mut V)
+struct MyRecord3Meta;
+
+impl<'s> sorting::Sortable<'s> for MyRecord3 {
+    type Meta = MyRecord3Meta;
+
+    fn get_meta() -> Self::Meta {
+        MyRecord3Meta
+    }
+}
+
+impl<'s> sorting::Meta<'s, MyRecord3> for MyRecord3Meta {
+    fn accept_visitor<V: sorting::SortVisitor<'s, Target = MyRecord3>>(&self, visitor: &mut V)
     where
         Self: Sized,
     {
-        visitor.visit_key_sort("foo", &FooField3, "int_field");
-        visitor.visit_key_sort("bar", &BarField3, "foo");
-        visitor.visit_sort("int_field", &IntField3, &ordering::CompareClass);
-        visitor.visit_sort("string_field", &StringField3, &ordering::CompareClass);
+        visitor.visit_key_sort("foo", &FooField3, "int_field", MyRecordMeta);
+        visitor.visit_key_sort("bar", &BarField3, "foo", MyRecord2Meta);
+        visitor.visit_sort("int_field", &IntField3, &sorting::CompareClass);
+        visitor.visit_sort("string_field", &StringField3, &sorting::CompareClass);
     }
 }
 
@@ -299,7 +327,7 @@ fn test_deeper_nesting() {
         },
     ];
 
-    let sr = ordering::OrderingSet::<MyRecord3>::new();
+    let sr = sorting::OrderingSet::<MyRecord3>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -435,7 +463,7 @@ fn test_macro() {
         },
     ];
 
-    let sr = ordering::OrderingSet::<MyRecord4>::new();
+    let sr = sorting::OrderingSet::<MyRecord4>::new();
 
     let sort = sr.create_sort("int_field").unwrap();
     sort.sort_vec(&mut v);
@@ -579,7 +607,7 @@ fn test_rename() {
         },
     ];
 
-    let sr = ordering::OrderingSet::<MyRecord5>::new();
+    let sr = sorting::OrderingSet::<MyRecord5>::new();
 
     let sort = sr.create_sort("int").unwrap();
     sort.sort_vec(&mut v);
@@ -655,7 +683,7 @@ fn test_double() {
         },
     ];
 
-    let sr = ordering::OrderingSet::<MyRecord>::new();
+    let sr = sorting::OrderingSet::<MyRecord>::new();
 
     let sort = sr.create_sort("int_field,string_field").unwrap();
     sort.sort_vec(&mut v);

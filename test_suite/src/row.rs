@@ -48,7 +48,7 @@ fn test_basic() {
         int_field: 1,
     };
 
-    let v = r.to_row();
+    let v = Record::get_serializer().to_row(&r);
 
     let compare = BTreeMap::from([
         (
@@ -91,7 +91,7 @@ fn test_nesting() {
         int_field: 1,
     };
 
-    let v = r.to_row();
+    let v = Record2::get_serializer().to_row(&r);
 
     let compare = BTreeMap::from([
         (
@@ -116,7 +116,7 @@ fn test_nesting() {
         int_field: 1,
     };
 
-    let v = r.to_row();
+    let v = Record3::get_serializer().to_row(&r);
 
     let compare = BTreeMap::from([
         (
@@ -153,7 +153,7 @@ fn test_exclude() {
         int_field: 1,
     };
 
-    let v = r.to_row();
+    let v = Record4::get_serializer().to_row(&r);
 
     let compare = BTreeMap::from([
         (
@@ -172,11 +172,11 @@ fn test_exclude() {
 #[test]
 fn test_columns() {
     assert_eq!(
-        Record::columns(),
+        Record::get_serializer().columns(),
         vec!["string_field".to_string(), "int_field".to_string()]
     );
     assert_eq!(
-        Record2::columns(),
+        Record2::get_serializer().columns(),
         vec![
             "nest".to_string(),
             "string_field".to_string(),
@@ -184,7 +184,7 @@ fn test_columns() {
         ]
     );
     assert_eq!(
-        Record3::columns(),
+        Record3::get_serializer().columns(),
         vec![
             "nest".to_string(),
             "string_field".to_string(),
@@ -192,7 +192,7 @@ fn test_columns() {
         ]
     );
     assert_eq!(
-        Record4::columns(),
+        Record4::get_serializer().columns(),
         vec!["string_field".to_string(), "int_field".to_string()]
     );
 }
@@ -216,7 +216,7 @@ struct Record5 {
 #[test]
 fn test_rename() {
     assert_eq!(
-        Record5::columns(),
+        Record5::get_serializer().columns(),
         vec![
             "NESTED_STRING".to_string(),
             "OUTER_STRING".to_string(),
@@ -233,7 +233,7 @@ fn test_rename() {
         int_field: 1,
     };
 
-    let v = r.to_row();
+    let v = Record5::get_serializer().to_row(&r);
 
     let compare = BTreeMap::from([
         (
@@ -265,7 +265,7 @@ struct Record7 {
 #[test]
 fn test_array() {
     assert_eq!(
-        Record7::columns(),
+        Record7::get_serializer().columns(),
         vec![
             "NESTED_STRING".to_string(),
             "OUTER_STRING".to_string(),
@@ -300,7 +300,7 @@ fn test_array() {
         int_field: 1,
     };
 
-    let v = r.to_row();
+    let v = Record7::get_serializer().to_row(&r);
 
     let compare = BTreeMap::from([
         (

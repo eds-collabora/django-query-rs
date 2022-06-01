@@ -1,40 +1,40 @@
-//! Convert Rust structs with named fields into tables of output.
+//! # Convert Rust structs with named fields into tables of output
 //!
-//! Django output pagination, filtering, and ordering is dealt with
-//! separately. This module is concerned with producing the individual
-//! formatted items in a Django query result, once those have been
-//! determined.
+//! Django produces JSON encoded tabular output in response to queries,
+//! where each row of the output is a JSON object, and those objects do not
+//! contain any nested objects. Instead, nested objects are represented
+//! by a pre-selected foreign key.
 //!
-//! We are mimicking what is essentially a database query result
-//! encoded into JSON, with each row represented by an object, and
-//! each cell in that row being the value of a member of this
-//! object. The column names in this encoding are the names of the
-//! members of each of the row objects.
+//! # Overview
 //!
-//! The [IntoRow] trait in this module is for converting an instance
-//! into a row within a table of output. The derive macro for this
-//! trait is an easy way to get an implementation for structs with
-//! named fields. Note that the values of the cells in a row cannot
-//! themselves be objects (this would effectively be a nested table),
-//! but they can be arrays. The [CellValue] type encodes this
-//! restriction.
+//! The [`IntoRow`] trait in this module allows the type to produce a [`Serializer`] that
+//! can convert an instance into a row within a table of JSON output.
+//! The [`macro@IntoRow`] derive macro for this
+//! trait will produce everything necessary for structs with
+//! named fields.
 //!
-//! A type which can be value of a particular column in a particular
-//! row should implement [IntoCellValue]. If the type implements
-//! [Display] and the desired JSON representation is a string, it's
-//! simplest to derive the marker trait [StringCellValue] to benefit
-//! from a blanket derivation of [IntoCellValue]. Otherwise the trait
-//! must be implemented directly.
+//! The value of a cell within the table cannot itself be JSON
+//! object-typed, in line with Django's database origins. However, it
+//! is possible to return multiple values in an array inside one
+//! cell. The [`CellValue`] type captures the subset of permitted JSON
+//! [`Value`](serde_json::Value)s that are permitted.
 //!
-//! The concept of foreign keys in this module is a direct carryover
-//! from the database model we are emulating. Django results do not
-//! contain nested objects, instead one field of the nested object is
-//! chosen to represent the object - a foreign key. The [AsForeignKey]
-//! trait captures this idea.
+//! A type which can directly be the value in a given cell of output
+//! should implement [`IntoCellValue`]. If the type implements
+//! [`Display`], and if the desired JSON representation is a string,
+//! you can derive the marker trait [`StringCellValue`] to benefit
+//! from a blanket derivation of [`IntoCellValue`] for string
+//! values. Otherwise [`IntoCellValue`] must be implemented directly.
+//!
+//! Since Django results do not contain nested objects, fields with
+//! structured types must be handled differently. Here, one field of
+//! the nested type is chosen to represent that value, as what is in
+//! effect a foreign key. The [`AsForeignKey`] trait captures this
+//! idea, and is blanket implemented for [`IntoRow`] types.
 //!
 //! Example:
 //! ```rust
-//! use django_query::IntoRow;
+//! use django_query::row::{Serializer, IntoRow};
 //! use serde_json::json;
 //! use std::sync::Arc;
 //!
@@ -49,16 +49,19 @@
 //! let f2 = Arc::new(Foo { a: 2, b: Some(f1.clone()) });
 //! let f3 = Arc::new(Foo { a: 3, b: Some(f2.clone()) });
 //!
-//! assert_eq!(f1.to_json(), json! {
+//! let ser = Arc::<Foo>::get_serializer();
+//!
+//! assert_eq!(ser.to_json(&f1), json! {
 //!   { "a": 1i32, "b": null }
 //! });
-//! assert_eq!(f2.to_json(), json! {
+//! assert_eq!(ser.to_json(&f2), json! {
 //!   { "a": 2i32, "b": 1i32 }
 //! });
-//! assert_eq!(f3.to_json(), json! {
+//! assert_eq!(ser.to_json(&f3), json! {
 //!   { "a": 3i32, "b": 2i32 }
 //! });
 //! ```
+
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -70,24 +73,27 @@ use serde_json::Number;
 /// The JSON types Django permits in cells - everything except object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CellValue {
-    /// A JSON null
+    /// A null
     Null,
-    /// A JSON boolean
+    /// A Boolean
     Bool(bool),
-    /// A JSON number
+    /// A number
     Number(Number),
-    /// A JSON string
+    /// A string
     String(String),
-    /// A JSON array of non-object values
+    /// An array of non-object values
     Array(Vec<CellValue>),
 }
 
-/// For things that can be converted into cell values within a Django output row.
+/// Convert a value into a JSON [`CellValue`].
+///
+/// [`CellValue`] captures the types that can appear within a cell of
+/// the output table.
 pub trait IntoCellValue {
     fn to_cell_value(&self) -> CellValue;
 }
 
-/// Marker which means use [Display] to convert the type into a [CellValue]
+/// Use [`Display`] to convert the type into a [`CellValue`]
 pub trait StringCellValue {}
 
 impl StringCellValue for String {}
@@ -215,7 +221,7 @@ where
     }
 }
 
-/// Something that can visit the values in a Django output row.
+/// Visit the values in the Django output row for a given value.
 pub trait CellVisitor {
     /// Visit a value in the row, where:
     /// - `name` is the name of the column
@@ -223,18 +229,68 @@ pub trait CellVisitor {
     fn visit_value(&mut self, name: &str, v: CellValue);
 }
 
-/// Something that can visit the columns that a Django output row sequence contains.
+/// Visit the columns that a Django output row for a given type will contain.
 pub trait ColumnVisitor {
     /// Visit a column in the row where:
     /// - `name` is the name of the column
     fn visit_column(&mut self, name: &str);
 }
 
-/// Something that can be converted into a row in Django output.
+/// Produce a [`Serializer`] to convert values of this type into rows
+/// of output.
+pub trait IntoRow<'s>: Sized {
+    type Serializer: Serializer<'s, Self>;
+    fn get_serializer() -> Self::Serializer;
+}
+
+/// A converter that visits rows of Django output for a given type.
 ///
 /// This is suitable for the top level of Django output; i.e. things
 /// whose collection has its own endpoint.
-pub trait IntoRow {
+pub trait Serializer<'a, T>
+where
+    Self: 'a,
+{
+    /// Visit the values in a row of output for this type using
+    /// `visitor`.
+    fn accept_cell_visitor<V: CellVisitor>(&self, value: &T, visitor: &mut V);
+
+    /// Visit the columns in a row using `visitor`; note that this
+    /// does not require an instance of the type.
+    fn accept_column_visitor<V: ColumnVisitor>(&self, visitor: &mut V);
+
+    /// Convert an instance of this type into a [`BTreeMap`].
+    fn to_row(&self, value: &T) -> BTreeMap<String, CellValue> {
+        let mut r = RowVisitor {
+            values: BTreeMap::new(),
+        };
+        self.accept_cell_visitor(value, &mut r);
+        r.values
+    }
+
+    /// Convert an instance of this type into a [`serde_json::Value`]
+    fn to_json(&self, value: &T) -> Value {
+        let mut j = JsonVisitor {
+            value: serde_json::map::Map::new(),
+        };
+        self.accept_cell_visitor(value, &mut j);
+        Value::Object(j.value)
+    }
+
+    /// Collect the columns for a table of this type into an ordered
+    /// sequence.
+    fn columns(&self) -> Vec<String> {
+        let mut c = ColumnListVisitor { value: Vec::new() };
+        self.accept_column_visitor(&mut c);
+        c.value
+    }
+}
+
+#[doc(hidden)]
+pub trait SelfSerializer<'a>
+where
+    Self: 'a,
+{
     /// Visit the values in a row of output for this type using
     /// `visitor`.
     fn accept_cell_visitor<V: CellVisitor>(&self, visitor: &mut V);
@@ -242,101 +298,185 @@ pub trait IntoRow {
     /// Visit the columns in a row using `visitor`; note that this
     /// does not require an instance of the type.
     fn accept_column_visitor<V: ColumnVisitor>(visitor: &mut V);
+}
 
-    /// Convert an instance of this type into a BTreeMap.
-    fn to_row(&self) -> BTreeMap<String, CellValue> {
-        let mut r = RowVisitor {
-            values: BTreeMap::new(),
-        };
-        self.accept_cell_visitor(&mut r);
-        r.values
-    }
+// Note the presence of the marker is to prevent type annotations
+// elsewhere, otherwise even though we have a constraint on some other
+// type that the serializer is for Self rust cannot rule out that we
+// wanted to use it for some other type.
+#[doc(hidden)]
+pub struct DefaultSelfSerializer<T> {
+    _marker: core::marker::PhantomData<T>,
+}
 
-    /// Convert an instance of this type into a [serde_json::Value]
-    fn to_json(&self) -> Value {
-        let mut j = JsonVisitor {
-            value: serde_json::map::Map::new(),
-        };
-        self.accept_cell_visitor(&mut j);
-        Value::Object(j.value)
-    }
-
-    /// Collect the columns for a table of this type into an ordered
-    /// sequence.
-    fn columns() -> Vec<String> {
-        let mut c = ColumnListVisitor { value: Vec::new() };
-        Self::accept_column_visitor(&mut c);
-        c.value
+impl<'a, T> IntoRow<'a> for T
+where
+    T: SelfSerializer<'a>,
+{
+    type Serializer = DefaultSelfSerializer<Self>;
+    fn get_serializer() -> Self::Serializer {
+        DefaultSelfSerializer {
+            _marker: Default::default(),
+        }
     }
 }
 
-impl<T> IntoRow for Option<T>
+impl<'a, T> Serializer<'a, T> for DefaultSelfSerializer<T>
 where
-    T: IntoRow,
+    T: SelfSerializer<'a>,
 {
-    fn accept_cell_visitor<V: CellVisitor>(&self, visitor: &mut V) {
-        if let Some(ref item) = self {
-            item.accept_cell_visitor(visitor);
+    fn accept_cell_visitor<V: CellVisitor>(&self, value: &T, visitor: &mut V) {
+        value.accept_cell_visitor(visitor)
+    }
+
+    fn accept_column_visitor<V: ColumnVisitor>(&self, visitor: &mut V) {
+        T::accept_column_visitor(visitor)
+    }
+}
+
+impl<'s, T> IntoRow<'s> for Option<T>
+where
+    T: IntoRow<'s>,
+{
+    type Serializer = OptionSerializer;
+    fn get_serializer() -> Self::Serializer {
+        OptionSerializer
+    }
+}
+
+#[doc(hidden)]
+pub struct OptionSerializer;
+
+impl<'s, T> Serializer<'s, Option<T>> for OptionSerializer
+where
+    T: IntoRow<'s>,
+{
+    fn accept_cell_visitor<V: CellVisitor>(&self, value: &Option<T>, visitor: &mut V) {
+        if let Some(item) = value.as_ref() {
+            T::get_serializer().accept_cell_visitor(item, visitor);
         } else {
             let mut n = NullColumnVisitor { parent: visitor };
-            T::accept_column_visitor(&mut n);
+            T::get_serializer().accept_column_visitor(&mut n);
         }
     }
 
-    fn accept_column_visitor<V: ColumnVisitor>(visitor: &mut V) {
-        T::accept_column_visitor(visitor);
+    fn accept_column_visitor<V: ColumnVisitor>(&self, visitor: &mut V) {
+        T::get_serializer().accept_column_visitor(visitor);
     }
 }
 
-impl<T> IntoRow for Arc<T>
+impl<'s, T> IntoRow<'s> for Arc<T>
 where
-    T: IntoRow,
+    T: IntoRow<'s>,
 {
-    fn accept_cell_visitor<V: CellVisitor>(&self, visitor: &mut V) {
-        T::accept_cell_visitor(&*self, visitor);
-    }
-
-    fn accept_column_visitor<V: ColumnVisitor>(visitor: &mut V) {
-        T::accept_column_visitor(visitor);
+    type Serializer = ArcSerializer;
+    fn get_serializer() -> Self::Serializer {
+        ArcSerializer
     }
 }
 
-/// Something which can be stored in a cell by specifying one of its
-/// fields to stand in for it.
-pub trait AsForeignKey {
+#[doc(hidden)]
+pub struct ArcSerializer;
+
+impl<'r, T> Serializer<'r, Arc<T>> for ArcSerializer
+where
+    T: IntoRow<'r>,
+{
+    fn accept_cell_visitor<V: CellVisitor>(&self, value: &Arc<T>, visitor: &mut V) {
+        T::get_serializer().accept_cell_visitor(&*value, visitor);
+    }
+
+    fn accept_column_visitor<V: ColumnVisitor>(&self, visitor: &mut V) {
+        T::get_serializer().accept_column_visitor(visitor);
+    }
+}
+
+/// Convert a structured value into a single representative [`CellValue`]
+///
+/// The conversion takes a `key`, so that different consumers can choose
+/// different foreign keys to represent this type in their output.
+pub trait AsForeignKey<'a, 'r>: Sized {
+    type CellReducer: CellReducer<'a, 'r, Self>;
+    fn get_cell_reducer(key: &'a str) -> Self::CellReducer;
+}
+
+impl<'a, 'r, T> AsForeignKey<'a, 'r> for T
+where
+    T: IntoRow<'r>,
+{
+    type CellReducer = SerializerCellReducer<'a, <T as IntoRow<'r>>::Serializer>;
+
+    fn get_cell_reducer(key: &'a str) -> Self::CellReducer {
+        SerializerCellReducer::new(T::get_serializer(), key)
+    }
+}
+
+impl<'a, 'r, T> AsForeignKey<'a, 'r> for Vec<T>
+where
+    T: AsForeignKey<'a, 'r>,
+{
+    type CellReducer = VecCellReducer<<T as AsForeignKey<'a, 'r>>::CellReducer>;
+    fn get_cell_reducer(key: &'a str) -> Self::CellReducer {
+        VecCellReducer {
+            nested: T::get_cell_reducer(key),
+        }
+    }
+}
+
+#[doc(hidden)]
+pub trait CellReducer<'a, 'r, T> {
     /// Return the representation of the object if the column `name`
     /// of its own table is used to stand in for it.
-    fn as_foreign_key(&self, name: &str) -> CellValue;
+    fn reduce_to_cell(&self, value: &T) -> CellValue;
 }
 
-impl<T> AsForeignKey for T
+#[doc(hidden)]
+pub struct SerializerCellReducer<'a, S> {
+    serializer: S,
+    key: &'a str,
+}
+
+impl<'a, S> SerializerCellReducer<'a, S> {
+    pub fn new(serializer: S, key: &'a str) -> Self {
+        Self { serializer, key }
+    }
+}
+
+impl<'a, 'r, S, T> CellReducer<'a, 'r, T> for SerializerCellReducer<'a, S>
 where
-    T: IntoRow,
+    S: Serializer<'r, T>,
 {
-    fn as_foreign_key(&self, name: &str) -> CellValue {
+    fn reduce_to_cell(&self, value: &T) -> CellValue {
         let mut k = ForeignKeyVisitor {
-            target: name,
+            target: self.key,
             value: None,
         };
-        self.accept_cell_visitor(&mut k);
+        self.serializer.accept_cell_visitor(value, &mut k);
         k.value.unwrap_or(CellValue::Null)
     }
 }
 
-impl<T> AsForeignKey for Vec<T>
+#[doc(hidden)]
+pub struct VecCellReducer<C> {
+    nested: C,
+}
+
+impl<'a, 'r, T, C> CellReducer<'a, 'r, Vec<T>> for VecCellReducer<C>
 where
-    T: AsForeignKey,
+    C: CellReducer<'a, 'r, T>,
 {
-    fn as_foreign_key(&self, name: &str) -> CellValue {
-        let mut v = Vec::new();
-        for item in self.iter() {
-            v.push(item.as_foreign_key(name))
-        }
-        CellValue::Array(v)
+    fn reduce_to_cell(&self, value: &Vec<T>) -> CellValue {
+        CellValue::Array(
+            value
+                .iter()
+                .map(|item| self.nested.reduce_to_cell(item))
+                .collect(),
+        )
     }
 }
 
-struct ForeignKeyVisitor<'a> {
+#[doc(hidden)]
+pub struct ForeignKeyVisitor<'a> {
     pub target: &'a str,
     pub value: Option<CellValue>,
 }
@@ -403,3 +543,98 @@ where
         self.parent.visit_value(name, CellValue::Null);
     }
 }
+
+// Generic state support
+
+/// Produce a [`Serializer`] to convert values of this type, which
+/// requires a context value, into rows of output.
+///
+#[cfg_attr(
+    feature = "persian-rug",
+    doc = r##"
+This can be derived via the
+[`IntoRowWithPersianRug`](IntoRowWithPersianRug)
+derive macro for the case of a [`persian-rug`](::persian_rug)
+type.
+"##
+)]
+pub trait IntoRowWithContext<'a, A: 'a>: Sized {
+    type Serializer: Serializer<'a, Self>;
+    /// `accessor` is some context value
+    fn get_serializer(accessor: A) -> Self::Serializer;
+}
+
+/// Convert a structured value into a single representative
+/// [`CellValue`] using a context value
+///
+/// The conversion takes a `key`, so that different consumers can choose
+/// different foreign keys to represent this type in their output.
+pub trait AsForeignKeyWithContext<'a, 'r, A: 'r>: Sized {
+    type CellReducer: CellReducer<'a, 'r, Self>;
+    fn get_cell_reducer(accessor: A, key: &'a str) -> Self::CellReducer;
+}
+
+impl<'a, 'r, A, T> AsForeignKeyWithContext<'a, 'r, A> for Vec<T>
+where
+    T: AsForeignKeyWithContext<'a, 'r, A>,
+    A: 'r,
+{
+    type CellReducer = VecCellReducer<<T as AsForeignKeyWithContext<'a, 'r, A>>::CellReducer>;
+    fn get_cell_reducer(accessor: A, key: &'a str) -> Self::CellReducer {
+        VecCellReducer {
+            nested: T::get_cell_reducer(accessor, key),
+        }
+    }
+}
+
+impl<'s, T, A> IntoRowWithContext<'s, A> for Option<T>
+where
+    T: IntoRowWithContext<'s, A>,
+    A: 's + Clone,
+{
+    type Serializer = OptionSerializerWithContext<A>;
+    fn get_serializer(access: A) -> Self::Serializer {
+        OptionSerializerWithContext { access }
+    }
+}
+
+impl<'a, 's, T, A> AsForeignKeyWithContext<'a, 's, A> for Option<T>
+where
+    T: IntoRowWithContext<'s, A>,
+    A: 's + Clone,
+{
+    type CellReducer = SerializerCellReducer<'a, OptionSerializerWithContext<A>>;
+    fn get_cell_reducer(access: A, key: &'a str) -> Self::CellReducer {
+        SerializerCellReducer::new(OptionSerializerWithContext { access }, key)
+    }
+}
+
+#[doc(hidden)]
+pub struct OptionSerializerWithContext<A> {
+    access: A,
+}
+
+impl<'s, T, A> Serializer<'s, Option<T>> for OptionSerializerWithContext<A>
+where
+    T: IntoRowWithContext<'s, A>,
+    A: 's + Clone,
+{
+    fn accept_cell_visitor<V: CellVisitor>(&self, value: &Option<T>, visitor: &mut V) {
+        if let Some(item) = value.as_ref() {
+            T::get_serializer(self.access.clone()).accept_cell_visitor(item, visitor);
+        } else {
+            let mut n = NullColumnVisitor { parent: visitor };
+            T::get_serializer(self.access.clone()).accept_column_visitor(&mut n);
+        }
+    }
+
+    fn accept_column_visitor<V: ColumnVisitor>(&self, visitor: &mut V) {
+        T::get_serializer(self.access.clone()).accept_column_visitor(visitor);
+    }
+}
+
+pub use django_query_derive::IntoRow;
+
+#[cfg(feature = "persian-rug")]
+#[cfg_attr(docsrs, doc(cfg(feature = "persian-rug")))]
+pub use crate::persian_rug::IntoRowWithPersianRug;
